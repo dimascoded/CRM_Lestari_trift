@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  id              String              @id @default(cuid())
+  name            String              @unique
+  rolloutStage    Int                 @default(1)
+  users           User[]
+  customers       Customer[]          @relation("RegisteredAt")
+  transactions    Transaction[]
+  stamps          Stamp[]
+  redemptions     Redemption[]
+  stockItems      StockItem[]
+  stockUpdateLogs StockUpdateLog[]
+  duplicateChecks DuplicateCheckLog[]
+  createdAt       DateTime            @default(now())
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  role      String
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Customer {
+  id                 String                   @id @default(cuid())
+  name               String
+  whatsapp           String                   @unique
+  optedOut           Boolean                  @default(false)
+  birthDate          DateTime?
+  favoriteCategory   String?
+  favoriteSize       String?
+  instagram          String?
+  registeredAtId     String
+  registeredAt       Branch                   @relation("RegisteredAt", fields: [registeredAtId], references: [id])
+  transactions       Transaction[]
+  stamps             Stamp[]
+  redemptions        Redemption[]
+  wishlists          Wishlist[]
+  reminderLogs       ReminderLog[]
+  stockNotifications StockMatchNotification[]
+  duplicateAttempts  DuplicateCheckLog[]      @relation("ExistingDuplicate")
+  createdAt          DateTime                 @default(now())
+
+  @@index([name])
+}
+
+model Transaction {
+  id             String      @id @default(cuid())
+  customerId     String
+  customer       Customer    @relation(fields: [customerId], references: [id])
+  branchId       String
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  amount         Int
+  discountAmount Int         @default(0)
+  redemptionId   String?     @unique
+  redemption     Redemption? @relation(fields: [redemptionId], references: [id])
+  createdAt      DateTime    @default(now())
+  stamp          Stamp?
+
+  @@index([customerId, createdAt])
+}
+
+model Stamp {
+  id            String      @id @default(cuid())
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  branchId      String
+  branch        Branch      @relation(fields: [branchId], references: [id])
+  dayKey        String
+  redeemedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@unique([customerId, dayKey])
+  @@index([customerId, redeemedAt])
+}
+
+model Redemption {
+  id              String   @id @default(cuid())
+  customerId      String
+  customer        Customer @relation(fields: [customerId], references: [id])
+  branchId        String
+  branch          Branch   @relation(fields: [branchId], references: [id])
+  stampCount      Int      @default(3)
+  discountPercent Int      @default(10)
+  createdAt       DateTime @default(now())
+  transaction     Transaction?
+}
+
+model StockItem {
+  id            String                   @id @default(cuid())
+  name          String
+  category      String
+  size          String
+  branchId      String
+  branch        Branch                   @relation(fields: [branchId], references: [id])
+  status        String                   @default("AVAILABLE")
+  enteredAt     DateTime                 @default(now())
+  soldAt        DateTime?
+  updatedAt     DateTime                 @updatedAt
+  notifications StockMatchNotification[]
+
+  @@index([branchId, status])
+  @@index([category, size])
+}
+
+model StockMatchNotification {
+  id          String    @id @default(cuid())
+  stockItemId String
+  stockItem   StockItem @relation(fields: [stockItemId], references: [id])
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  sentAt      DateTime  @default(now())
+
+  @@unique([stockItemId, customerId])
+  @@index([customerId, sentAt])
+}
+
+model DuplicateCheckLog {
+  id                 String   @id @default(cuid())
+  attemptedName      String
+  branchId           String
+  branch             Branch   @relation(fields: [branchId], references: [id])
+  existingCustomerId String
+  existingCustomer   Customer @relation("ExistingDuplicate", fields: [existingCustomerId], references: [id])
+  attemptedAt        DateTime @default(now())
+
+  @@index([attemptedAt])
+}
+
+model StockUpdateLog {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  userId    String?
+  type      String   @default("CHANGE")
+  updatedAt DateTime @default(now())
+
+  @@index([branchId, updatedAt])
+}
+
+model Wishlist {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  category   String?
+  size       String?
+  keyword    String?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([active, category, size])
+}
+
+model ReminderTemplate {
+  id        String        @id @default(cuid())
+  name      String
+  message   String
+  segment   String
+  schedule  DateTime?
+  active    Boolean       @default(true)
+  logs      ReminderLog[]
+  createdAt DateTime      @default(now())
+}
+
+model ReminderLog {
+  id           String           @id @default(cuid())
+  customerId   String
+  customer     Customer         @relation(fields: [customerId], references: [id])
+  templateId   String
+  template     ReminderTemplate @relation(fields: [templateId], references: [id])
+  body         String           @default("")
+  scheduledFor DateTime?
+  status       String           @default("SENT")
+  sentAt       DateTime         @default(now())
+
+  @@index([customerId, sentAt])
+}
+
+model KpiTarget {
+  id       String  @id @default(cuid())
+  code     String  @unique
+  label    String
+  unit     String
+  baseline Float?
+  target   Float
+}

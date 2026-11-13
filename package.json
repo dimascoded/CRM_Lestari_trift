@@ -6,9 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.mjs",
+    "db:setup": "prisma migrate dev && node prisma/seed.mjs",
+    "test:regression": "node --disable-warning=ExperimentalWarning --experimental-strip-types --experimental-loader ./tests/ts-loader.mjs tests/regression.mjs"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.0",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -21,6 +26,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "prisma": "^6.19.0",
     "tailwindcss": "4.3.3",
     "typescript": "^5"
   }

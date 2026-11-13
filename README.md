@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lestari Thrift CRM
 
-## Getting Started
+Purwarupa CRM lintas cabang dengan Next.js App Router, TypeScript, SQLite, Prisma, dan Tailwind CSS.
 
-First, run the development server:
+## Menjalankan lokal
 
-```bash
+```powershell
+npm install
+Copy-Item .env.example .env
+npm run db:setup
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Buka `http://localhost:3000`. Perintah `db:setup` membuat tabel SQLite dan memuat data demo empat cabang. Dengan URL contoh, database lokal tersimpan di `prisma/prisma/dev.db` dan tidak masuk Git.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Perintah lain:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+npm run db:push  # sinkronkan schema tanpa membuat migration (pengembangan saja)
+npm run db:seed  # isi data demo secara idempoten
+npx prisma migrate dev --name nama_migration
+npm run lint
+npm run build
+npm run test:regression
+```
 
-## Learn More
+`db:setup` menjalankan migration Prisma dan seed. Migration baseline di `prisma/migrations` menjaga database lama yang sebelumnya dibuat dengan `db push` tanpa perlu mereset data.
 
-To learn more about Next.js, take a look at the following resources:
+## Urutan pengembangan
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **Fondasi data dan UI:** model cabang, akun, pelanggan, transaksi, stamp, stok, wishlist, dan reminder; shell navigasi responsif; data demo.
+2. **Pelanggan dan loyalitas:** pencarian terpisah dari pendaftaran, transaksi, diskon otomatis tiga stamp, dan satu stamp per hari.
+3. **Stok dan portal:** konfirmasi stok harian, katalog publik baca-saja, wishlist pelanggan, profil, opt-out, serta notifikasi simulasi.
+4. **Marketing dan laporan:** reminder sesuai kebiasaan beli, batas kirim tujuh hari, tab laporan, dan KPI BDN.
+5. **Akses:** pemilih peran dan login pelanggan simulasi tersedia; autentikasi/otorisasi produksi masih menjadi pekerjaan lanjutan.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Tahap 1–4 tersedia sebagai purwarupa lokal saat ini. Tahap 5 masih diperlukan sebelum sistem dipakai operasional.
 
-## Deploy on Vercel
+## Nilai demo dan batasan
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Nominal minimum transaksi untuk mendapat stamp saat ini **Rp100.000**.
+- Penukaran tiga stamp memberi diskon demo **10%**.
+- Keduanya adalah nilai sementara karena belum ditentukan di kebutuhan kelompok. Ubah `STAMP_MINIMUM_TRANSACTION` dan `REDEMPTION_DISCOUNT_PERCENT` di `src/lib/business-rules.ts` setelah keputusan final.
+- Semua pengiriman WhatsApp hanya simulasi dalam database; integrasi WhatsApp eksternal tidak digunakan.
+- Pemilih role hanya menyaring menu; ini bukan autentikasi atau batas keamanan. Login portal menggunakan kode tetap `123456`, hanya untuk simulasi. Jangan masukkan data pelanggan nyata sampai autentikasi dan otorisasi server tersedia.
+- `/api/cron/reminders` memproses reminder yang jatuh tempo. Lindungi endpoint ini sebelum mengeksposnya ke internet; belum ada integrasi `node-cron` atau autentikasi cron.
+- Data pelanggan dan katalog pada database lokal hanyalah data contoh sintetis.
+- `npm run test:regression` membuat dan menghapus hanya database uji terisolasi `prisma/prisma/regression-test.db`; database demo lokal tidak disentuh.
