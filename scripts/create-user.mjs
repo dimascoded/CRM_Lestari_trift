@@ -8,9 +8,6 @@ const roles = ["CASHIER", "STOCK_STAFF", "MANAGER", "MARKETING", "OWNER"];
 const input = createInterface({ input: stdin, output: stdout });
 
 function askHidden(label) {
-  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
-    throw new Error("Run this command from an interactive terminal so the password can be hidden.");
-  }
   stdout.write(label);
   stdin.setRawMode(true);
   stdin.resume();
@@ -43,6 +40,10 @@ function askHidden(label) {
 }
 
 async function main() {
+  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+    throw new Error("Run this command from an interactive terminal so the password can be hidden.");
+  }
+
   const name = (await input.question("Nama staf: ")).trim();
   const email = (await input.question("Email login: ")).trim().toLowerCase();
   const role = (await input.question(`Peran (${roles.join(", ")}): `)).trim().toUpperCase();

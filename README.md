@@ -14,7 +14,7 @@ npm run dev
 
 Buka `http://localhost:3000`. Perintah `db:setup` membuat tabel SQLite dan memuat data demo empat cabang. Dengan URL contoh, database lokal tersimpan di `prisma/prisma/dev.db` dan tidak masuk Git.
 
-`npm run user:create` berjalan interaktif: isi nama dan email demo, pilih peran (`OWNER` tidak memerlukan cabang), lalu buat password lokal minimal 12 karakter. Peringatan Node `MODULE_TYPELESS_PACKAGE_JSON` tidak menghentikan prompt. Jangan gunakan password atau data pelanggan nyata untuk demo.
+`npm run user:create` harus dijalankan dari terminal interaktif: isi nama dan email demo, pilih peran (`OWNER` tidak memerlukan cabang), lalu buat password lokal minimal 12 karakter yang dimasukkan secara tersembunyi dan dikonfirmasi ulang. Pemanggilan non-interaktif ditolak sebelum akun dibuat. Jangan gunakan password atau data pelanggan nyata untuk demo.
 
 Perintah lain:
 
@@ -46,7 +46,7 @@ Setelah `db:setup`, buat akun owner pertama dengan `npm run user:create`, lalu b
 
 Login pelanggan memakai OTP acak hanya di lingkungan pengembangan; kode ditampilkan di terminal server dan kedaluwarsa setelah 5 menit. Login pelanggan di production ditolak sampai provider OTP WhatsApp disambungkan. Jangan gunakan purwarupa ini untuk data pelanggan nyata sebelum integrasi itu dan tinjauan keamanan selesai.
 
-Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `Authorization: Bearer <secret>`; tanpa konfigurasi endpoint menolak permintaan.
+Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `Authorization: Bearer <secret>`; tanpa konfigurasi endpoint menolak permintaan. Scheduler juga dapat dijalankan manual dari halaman Manajemen. Tidak ada `node-cron` yang berjalan otomatis.
 
 ## Nilai demo dan batasan
 
@@ -56,7 +56,8 @@ Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `
 - Pesan memerlukan persetujuan eksplisit. Pendaftaran kasir tidak memilih persetujuan otomatis; persetujuan dan pencabutan dicatat beserta sumber, versi teks, dan waktunya. Pelanggan lama dimigrasikan tanpa persetujuan.
 - Batas satu pesan per tujuh hari berlaku gabungan untuk reminder dan notifikasi wishlist, bukan satu batas terpisah per jenis pesan.
 - Reminder dan notifikasi wishlist hanya membuat catatan simulasi di database; tidak ada pesan yang dikirim dan tidak diperlukan API atau biaya WhatsApp.
-- `/api/cron/reminders` memproses reminder yang jatuh tempo. Lindungi endpoint ini sebelum mengeksposnya ke internet; belum ada integrasi `node-cron` atau autentikasi cron.
+- `/api/cron/reminders` memproses reminder yang jatuh tempo dan memerlukan secret di atas. Endpoint bukan scheduler otomatis; jangan mengeksposnya ke internet tanpa kontrol operasional yang sesuai.
+- Checklist peran, SOP, pelatihan, risiko, evaluasi bulanan, dan gerbang pilot ada di [docs/operasional-crm.md](./docs/operasional-crm.md).
 - Data pelanggan dan katalog pada database lokal hanyalah data contoh sintetis.
 - `npm run test:regression` membuat dan menghapus hanya database uji terisolasi `prisma/prisma/regression-test.db`; database demo lokal tidak disentuh.
 
