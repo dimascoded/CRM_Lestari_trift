@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createReminderTemplate, runReminderScheduler, sendReminderCampaign } from "@/app/actions";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
+import { requireStaffPage } from "@/lib/auth";
 import { currentTime, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, REMINDER_COOLDOWN_DAYS } from "@/lib/business-rules";
 import { getKpis } from "@/lib/kpi";
 import { db } from "@/lib/db";
@@ -20,6 +21,7 @@ export default function ManagementPage({ searchParams }: { searchParams: SearchP
 }
 
 async function ManagementContent({ searchParams }: { searchParams: SearchParams }) {
+  await requireStaffPage(["OWNER", "MANAGER", "MARKETING"]);
   const params = await searchParams;
   const requestedTab = typeof params.tab === "string" ? params.tab : "reminder";
   const tab: ManagementTab = tabs.find(({ id }) => id === requestedTab)?.id ?? "reminder";

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { setActiveRole } from "@/app/actions";
+import { logoutStaff } from "@/app/actions";
 
 type Role = "kasir" | "stok" | "manajer" | "marketing" | "pemilik";
 type NavigationItem = { href: string; label: string; icon: string; section: string };
@@ -35,10 +35,12 @@ const roleLabels: Record<Role, string> = {
 export function AppShell({
   children,
   role,
+  userName,
   branchCount,
 }: {
   children: ReactNode;
   role: Role;
+  userName: string;
   branchCount: number;
 }) {
   const pathname = usePathname();
@@ -84,7 +86,8 @@ export function AppShell({
           </div>
           <div className="user-profile">
             <div className="user-avatar">{roleLabels[role].slice(0, 2).toUpperCase()}</div>
-            <div><strong>{roleLabels[role]}</strong><small>Peran simulasi</small></div>
+            <div><strong>{userName}</strong><small>{roleLabels[role]}</small></div>
+            <form action={logoutStaff}><button className="inline-action" type="submit">Keluar</button></form>
           </div>
         </div>
       </aside>
@@ -93,13 +96,7 @@ export function AppShell({
           <div className="breadcrumb"><span>Lestari Thrift</span><b>/</b><strong>{currentPage?.label ?? "CRM"}</strong></div>
           <div className="topbar-actions">
             <span className="live-status"><i /> {branchCount} cabang terhubung</span>
-            <form action={setActiveRole} className="role-switcher">
-              <label htmlFor="active-role">Peran</label>
-              <select id="active-role" name="role" defaultValue={role}>
-                {Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-              <button className="button small secondary" type="submit">Ganti</button>
-            </form>
+            <span className="signed-in-user">{userName}</span>
           </div>
         </header>
         {children}

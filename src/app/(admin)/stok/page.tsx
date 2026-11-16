@@ -2,6 +2,7 @@ import Link from "next/link";
 import { addStockItem, confirmStockToday, markStockSold, updateStockItem } from "@/app/actions";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
+import { requireStaffPage } from "@/lib/auth";
 import { currentTime, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
@@ -12,6 +13,7 @@ export default function StockPage({ searchParams }: { searchParams: SearchParams
 }
 
 async function StockContent({ searchParams }: { searchParams: SearchParams }) {
+  await requireStaffPage(["OWNER", "MANAGER", "STOCK_STAFF"]);
   const params = await searchParams;
   const status = typeof params.status === "string" ? params.status : undefined;
   const detail = typeof params.matches === "string" ? params.matches : undefined;

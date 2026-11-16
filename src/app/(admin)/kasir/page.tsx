@@ -2,6 +2,7 @@ import Link from "next/link";
 import { registerCustomer, recordTransaction } from "@/app/actions";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
+import { requireStaffPage } from "@/lib/auth";
 import { normalizeWhatsApp, REDEMPTION_DISCOUNT_PERCENT, STAMP_MINIMUM_TRANSACTION, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
@@ -12,6 +13,7 @@ export default function KasirPage({ searchParams }: { searchParams: SearchParams
 }
 
 async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
+  await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const customerId = typeof params.customer === "string" ? params.customer : "";

@@ -23,12 +23,15 @@ model Branch {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  role      String
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id])
-  createdAt DateTime @default(now())
+  id           String        @id @default(cuid())
+  name         String
+  role         String
+  branchId     String?
+  email        String?       @unique
+  passwordHash String?
+  branch       Branch?       @relation(fields: [branchId], references: [id])
+  sessions     UserSession[]
+  createdAt    DateTime      @default(now())
 }
 
 model Customer {
@@ -49,6 +52,8 @@ model Customer {
   reminderLogs       ReminderLog[]
   stockNotifications StockMatchNotification[]
   duplicateAttempts  DuplicateCheckLog[]      @relation("ExistingDuplicate")
+  loginCodes         CustomerLoginCode[]
+  sessions           CustomerSession[]
   createdAt          DateTime                 @default(now())
 
   @@index([name])
@@ -195,4 +200,39 @@ model KpiTarget {
   unit     String
   baseline Float?
   target   Float
+}
+
+model UserSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model CustomerSession {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, expiresAt])
+}
+
+model CustomerLoginCode {
+  id         String   @id @default(cuid())
+  codeHash   String
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  attempts   Int      @default(0)
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
 }

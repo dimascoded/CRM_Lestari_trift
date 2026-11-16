@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { beginPortalLogin, createWishlist, logoutPortalCustomer, toggleWishlist, updateCustomerProfile, updateMessagePreference, verifyPortalLogin } from "@/app/actions";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { StockCatalog } from "@/components/StockCatalog";
+import { getCustomerSession } from "@/lib/auth";
 import { REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
@@ -21,7 +21,7 @@ export default function PortalPage({ searchParams }: { searchParams: SearchParam
 }
 
 async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
-  const [params, cookieStore] = await Promise.all([searchParams, cookies()]);
+  const [params, customerSession] = await Promise.all([searchParams, getCustomerSession()]);
   const status = typeof params.status === "string" ? params.status : undefined;
   const loginStep = params.login === "verify";
   const phone = typeof params.phone === "string" ? params.phone : "";
@@ -30,10 +30,9 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
   const category = typeof params.category === "string" ? params.category : "";
   const size = typeof params.size === "string" ? params.size : "";
   const branch = typeof params.branch === "string" ? params.branch : "";
-  const customerId = cookieStore.get("customerId")?.value;
-  const customer = customerId
+  const customer = customerSession
     ? await db.customer.findUnique({
-        where: { id: customerId },
+        where: { id: customerSession.customer.id },
         include: {
           stamps: { orderBy: { createdAt: "desc" }, include: { branch: true } },
           transactions: { orderBy: { createdAt: "desc" }, take: 3, include: { branch: true } },
@@ -53,21 +52,21 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
         <PageHeader eyebrow="PORTAL PELANGGAN" title="Masuk ke portal" description="Gunakan nomor WhatsApp yang terdaftar untuk melihat stamp, wishlist, dan katalog." />
         <Notice status={status} />
         <section className="form-card login-card">
-          <span className="simulation-label">SIMULASI LOGIN</span>
+          <span className="simulation-label">OTP PENGEMBANGAN</span>
           {loginStep ? (
             <>
               <h2>Masukkan kode verifikasi</h2>
-              <p>Kode simulasi dikirim ke {phone}. Untuk purwarupa ini gunakan kode <strong>123456</strong>.</p>
+              <p>Di lingkungan pengembangan, kode acak ditampilkan di terminal server dan berlaku 5 menit. Login portal production menunggu integrasi OTP WhatsApp.</p>
               <form action={verifyPortalLogin}>
                 <input type="hidden" name="whatsapp" value={phone} />
-                <div className="field"><label htmlFor="portal-code">Kode verifikasi</label><input id="portal-code" name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required placeholder="123456" /></div>
+                <div className="field"><label htmlFor="portal-code">Kode verifikasi</label><input id="portal-code" name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required autoComplete="one-time-code" /></div>
                 <div className="form-actions"><button className="button" type="submit">Verifikasi dan masuk</button><Link className="button secondary" href="/portal">Kembali</Link></div>
               </form>
             </>
           ) : (
             <>
               <h2>Masuk dengan WhatsApp</h2>
-              <p>Nomor yang digunakan harus sudah terdaftar di database pelanggan.</p>
+              <p>Masukkan nomor WhatsApp yang terdaftar. Kode hanya dikirim melalui alur OTP yang terverifikasi.</p>
               <form action={beginPortalLogin}>
                 <div className="field"><label htmlFor="portal-whatsapp">Nomor WhatsApp</label><input id="portal-whatsapp" name="whatsapp" inputMode="tel" autoComplete="tel" required placeholder="08xx atau +62..." /></div>
                 <div className="form-actions"><button className="button" type="submit">Lanjutkan</button></div>
@@ -137,7 +136,6 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
         <section className="form-card portal-section">
           <h2>Wishlist</h2><p>Tambahkan kategori, ukuran, atau kata kunci yang sedang dicari.</p>
           <form action={createWishlist}>
-            <input type="hidden" name="customerId" value={customer.id} />
             <div className="form-grid">
               <div className="field"><label htmlFor="wishlist-category">Kategori</label><select id="wishlist-category" name="category" defaultValue=""><option value="">Semua</option><option>Atasan</option><option>Bawahan</option><option>Dress</option><option>Outer</option><option>Aksesori</option><option>Sepatu</option></select></div>
               <div className="field"><label htmlFor="wishlist-size">Ukuran</label><select id="wishlist-size" name="size" defaultValue=""><option value="">Semua</option>{["XS", "S", "M", "L", "XL", "XXL", "All size"].map((size) => <option key={size}>{size}</option>)}</select></div>
@@ -159,7 +157,6 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
         <section className="form-card portal-section">
           <h2>Profil dan preferensi pesan</h2><p>Data tambahan bersifat opsional. Anda dapat berhenti menerima reminder kapan saja.</p>
           <form action={updateCustomerProfile}>
-            <input type="hidden" name="customerId" value={customer.id} />
             <div className="form-grid">
               <div className="field"><label htmlFor="favorite-category">Kategori favorit</label><input id="favorite-category" name="favoriteCategory" defaultValue={customer.favoriteCategory ?? ""} /></div>
               <div className="field"><label htmlFor="favorite-size">Ukuran favorit</label><input id="favorite-size" name="favoriteSize" defaultValue={customer.favoriteSize ?? ""} /></div>
@@ -169,7 +166,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
             <div className="form-actions"><button className="button secondary" type="submit">Simpan profil</button></div>
           </form>
           <div className="section-spacer">
-            <form action={updateMessagePreference}><input type="hidden" name="customerId" value={customer.id} /><input type="hidden" name="optedOut" value={String(!customer.optedOut)} /><button className={`button small ${customer.optedOut ? "secondary" : "danger"}`} type="submit">{customer.optedOut ? "Aktifkan reminder kembali" : "Berhenti menerima pesan"}</button></form>
+            <form action={updateMessagePreference}><input type="hidden" name="optedOut" value={String(!customer.optedOut)} /><button className={`button small ${customer.optedOut ? "secondary" : "danger"}`} type="submit">{customer.optedOut ? "Aktifkan reminder kembali" : "Berhenti menerima pesan"}</button></form>
             <p className="field-hint profile-status">Status: {customer.optedOut ? "opt-out, tidak menerima pesan" : "dapat menerima pesan yang memenuhi aturan"}</p>
           </div>
         </section>

@@ -21,9 +21,10 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey }, { registerCustomerRecord }, { recordTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { registerCustomerRecord }, { recordTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
+  import("../src/lib/password.ts"),
   import("../src/lib/customer-service.ts"),
   import("../src/lib/transaction-service.ts"),
   import("../src/lib/wishlist-match.ts"),
@@ -48,6 +49,22 @@ const targets = [
   ["S7a", "Rata-rata transaksi per pelanggan aktif per bulan", "kali", 1.6, 1.84],
   ["S7b", "Pelanggan beli dalam 7 hari setelah reminder", "%", null, 20],
 ];
+
+test("staff passwords and customer login codes are not stored as plaintext", async () => {
+  const password = "thrift-test-password-2026";
+  const passwordHash = await hashPassword(password);
+  assert.notEqual(passwordHash, password);
+  assert.equal(await verifyPassword(password, passwordHash), true);
+  assert.equal(await verifyPassword(`${password}x`, passwordHash), false);
+  await assert.rejects(() => hashPassword("short"), /between 12 and 200/);
+
+  const code = generateCustomerLoginCode();
+  assert.match(code, /^\d{6}$/);
+  const codeHash = await hashCustomerLoginCode(code);
+  assert.notEqual(codeHash, code);
+  assert.equal(await verifyCustomerLoginCode(code, codeHash), true);
+  assert.equal(await verifyCustomerLoginCode("000000", codeHash), false);
+});
 await db.kpiTarget.createMany({
   data: targets.map(([code, label, unit, baseline, target]) => ({ code, label, unit, baseline, target })),
 });
@@ -85,12 +102,12 @@ test("duplicate registration is rejected and logged", async () => {
 
 test("below-minimum and same-day purchases do not issue an extra stamp", async () => {
   const buyer = await customer("Uji Stamp Harian");
-  const belowMinimum = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[0].id, amount: 99999, useStampDiscount: true });
+  const belowMinimum = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[0].id, amount: STAMP_MINIMUM_TRANSACTION - 1, useStampDiscount: true });
   assert.deepEqual(belowMinimum, { result: "below-minimum", discountAmount: 0 });
   assert.equal(await db.stamp.count({ where: { customerId: buyer.id } }), 0);
 
-  const first = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[0].id, amount: 100000, useStampDiscount: true });
-  const second = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[1].id, amount: 100000, useStampDiscount: true });
+  const first = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[0].id, amount: STAMP_MINIMUM_TRANSACTION, useStampDiscount: true });
+  const second = await recordTransactionRecord({ customerId: buyer.id, branchId: branches[1].id, amount: STAMP_MINIMUM_TRANSACTION, useStampDiscount: true });
   assert.equal(first?.result, "stamp-added");
   assert.equal(second?.result, "already-stamped");
   assert.equal(await db.stamp.count({ where: { customerId: buyer.id, dayKey: jakartaDayKey() } }), 1);
@@ -117,10 +134,10 @@ test("three oldest stamps are discounted across all branches", async () => {
     const threeStampResult = await recordTransactionRecord({
       customerId: threeStampBuyer.id,
       branchId: branch.id,
-      amount: 125009,
+      amount: 150009,
       useStampDiscount: true,
     });
-    assert.deepEqual(threeStampResult, { result: "stamp-added", discountAmount: 12500 });
+    assert.deepEqual(threeStampResult, { result: "stamp-added", discountAmount: 15000 });
     assert.equal(await db.stamp.count({ where: { customerId: threeStampBuyer.id, redeemedAt: { not: null } } }), 3);
     assert.equal(await db.redemption.count({ where: { customerId: threeStampBuyer.id, branchId: branch.id } }), 1);
   }

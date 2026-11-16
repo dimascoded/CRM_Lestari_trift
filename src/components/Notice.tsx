@@ -16,7 +16,7 @@ const messages: Record<string, { text: string; tone?: "success" | "warning" | "e
   "stock-already-sold": { text: "Barang ini sudah ditandai terjual.", tone: "warning" },
   "stock-added": { text: "Stok tersimpan dan wishlist yang cocok sudah diperiksa.", tone: "success" },
   "stock-confirmed": { text: "Stok cabang dikonfirmasi untuk hari ini.", tone: "success" },
-  "invalid-wishlist": { text: "Pilih pelanggan dan isi setidaknya satu kriteria wishlist.", tone: "error" },
+  "invalid-wishlist": { text: "Isi setidaknya satu kriteria wishlist.", tone: "error" },
   "invalid-wishlist-id": { text: "Item wishlist tidak valid.", tone: "error" },
   "wishlist-created": { text: "Wishlist berhasil ditambahkan.", tone: "success" },
   "invalid-template": { text: "Lengkapi nama, isi pesan, dan segmen reminder.", tone: "error" },
@@ -25,8 +25,9 @@ const messages: Record<string, { text: string; tone?: "success" | "warning" | "e
   "template-created": { text: "Template reminder berhasil disimpan.", tone: "success" },
   "preference-updated": { text: "Preferensi pesan pelanggan berhasil diperbarui.", tone: "success" },
   "invalid-phone": { text: "Masukkan nomor WhatsApp yang valid.", tone: "error" },
-  "login-failed": { text: "Kode simulasi salah. Gunakan kode 123456.", tone: "error" },
-  "invalid-role": { text: "Peran yang dipilih tidak valid.", tone: "error" },
+  "login-failed": { text: "Email/password atau kode verifikasi tidak valid atau sudah kedaluwarsa.", tone: "error" },
+  "login-code-sent": { text: "Jika nomor terdaftar, kode verifikasi lokal tersedia di terminal server dan berlaku 5 menit.", tone: "success" },
+  "login-unavailable": { text: "Login portal pelanggan belum tersedia di production sampai provider OTP WhatsApp dikonfigurasi.", tone: "warning" },
 };
 
 export function Notice({

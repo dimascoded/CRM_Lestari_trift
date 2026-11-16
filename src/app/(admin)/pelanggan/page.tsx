@@ -1,5 +1,6 @@
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
+import { requireStaffPage } from "@/lib/auth";
 import { normalizeWhatsApp } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
@@ -10,6 +11,7 @@ export default function CustomersPage({ searchParams }: { searchParams: SearchPa
 }
 
 async function CustomersContent({ searchParams }: { searchParams: SearchParams }) {
+  await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const status = typeof params.status === "string" ? params.status : undefined;

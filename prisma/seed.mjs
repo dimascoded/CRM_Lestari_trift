@@ -105,7 +105,7 @@ async function main() {
           createdAt,
         },
       });
-      if (plan.customer.id === dinda.id || (plan.customer.id === sarah.id && plan.amount >= 100000)) {
+      if (plan.customer.id === dinda.id || (plan.customer.id === sarah.id && plan.amount >= 150000)) {
         await db.stamp.create({
           data: {
             customerId: plan.customer.id,

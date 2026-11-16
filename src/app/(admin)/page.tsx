@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { requireStaffPage } from "@/lib/auth";
 import { currentTime, jakartaDayKey, rupiah } from "@/lib/business-rules";
 import { getKpis } from "@/lib/kpi";
 import { db } from "@/lib/db";
@@ -11,6 +12,7 @@ export default function DashboardPage() {
 }
 
 async function DashboardContent() {
+  await requireStaffPage(["OWNER", "MANAGER"]);
   const now = currentTime();
   const today = jakartaDayKey(now);
   const [customers, stampsToday, availableStock, wishlistMatches, branches, transactions, kpis] = await Promise.all([
