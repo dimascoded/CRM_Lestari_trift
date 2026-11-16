@@ -39,6 +39,7 @@ model Customer {
   name               String
   whatsapp           String                   @unique
   optedOut           Boolean                  @default(false)
+  marketingConsent   Boolean                  @default(false)
   birthDate          DateTime?
   favoriteCategory   String?
   favoriteSize       String?
@@ -54,6 +55,7 @@ model Customer {
   duplicateAttempts  DuplicateCheckLog[]      @relation("ExistingDuplicate")
   loginCodes         CustomerLoginCode[]
   sessions           CustomerSession[]
+  messageConsents    MessageConsent[]
   createdAt          DateTime                 @default(now())
 
   @@index([name])
@@ -233,6 +235,21 @@ model CustomerLoginCode {
   expiresAt  DateTime
   usedAt     DateTime?
   createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model MessageConsent {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel       String   @default("WHATSAPP")
+  purpose       String   @default("MARKETING")
+  status        String
+  source        String
+  policyVersion String
+  consentText   String
+  createdAt     DateTime @default(now())
 
   @@index([customerId, createdAt])
 }

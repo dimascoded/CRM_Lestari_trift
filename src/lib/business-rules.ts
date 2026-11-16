@@ -7,6 +7,9 @@ export const REMINDER_LEAD_DAYS = 2;
 export const REMINDER_GRACE_DAYS = 3;
 export const REMINDER_HISTORY_SIZE = 5;
 export const ON_TIME_MINUTES = 60;
+export const MESSAGE_CONSENT_POLICY_VERSION = "2026-11-v1";
+export const MESSAGE_CONSENT_TEXT =
+  "Saya setuju menerima pesan WhatsApp dari Lestari Thrift berupa reminder belanja dan pemberitahuan stok wishlist, maksimal 1 pesan dalam 7 hari. Saya dapat menarik persetujuan kapan saja.";
 
 export function normalizeWhatsApp(value: string) {
   const input = value.trim();

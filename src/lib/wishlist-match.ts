@@ -1,6 +1,23 @@
 import { Prisma, type StockItem, type Wishlist } from "@prisma/client";
+import { daysBefore, REMINDER_COOLDOWN_DAYS } from "./business-rules";
 
 type Transaction = Prisma.TransactionClient;
+
+async function customersWithRecentMessages(tx: Transaction, customerIds: string[]) {
+  if (!customerIds.length) return new Set<string>();
+  const sentAfter = daysBefore(REMINDER_COOLDOWN_DAYS);
+  const [reminders, stockNotifications] = await Promise.all([
+    tx.reminderLog.findMany({
+      where: { customerId: { in: customerIds }, sentAt: { gte: sentAfter } },
+      select: { customerId: true },
+    }),
+    tx.stockMatchNotification.findMany({
+      where: { customerId: { in: customerIds }, sentAt: { gte: sentAfter } },
+      select: { customerId: true },
+    }),
+  ]);
+  return new Set([...reminders, ...stockNotifications].map(({ customerId }) => customerId));
+}
 
 function matchesWishlist(wishlist: Wishlist, item: StockItem) {
   const keyword = wishlist.keyword?.trim().toLocaleLowerCase("id-ID");
@@ -33,24 +50,27 @@ async function createMissingNotifications(tx: Transaction, rows: { stockItemId: 
 export async function matchStockItem(tx: Transaction, item: StockItem) {
   if (item.status !== "AVAILABLE") return 0;
   const wishlists = await tx.wishlist.findMany({
-    where: { active: true, customer: { optedOut: false } },
+    where: { active: true, customer: { optedOut: false, marketingConsent: true } },
   });
-  const customerIds = [...new Set(
+  const matchingCustomerIds = [...new Set(
     wishlists.filter((wishlist) => matchesWishlist(wishlist, item)).map(({ customerId }) => customerId),
   )];
-  await createMissingNotifications(tx, customerIds.map((customerId) => ({ stockItemId: item.id, customerId })));
-  return customerIds.length;
+  const recentlyMessaged = await customersWithRecentMessages(tx, matchingCustomerIds);
+  const customerIds = matchingCustomerIds.filter((customerId) => !recentlyMessaged.has(customerId));
+  return createMissingNotifications(tx, customerIds.map((customerId) => ({ stockItemId: item.id, customerId })));
 }
 
 export async function matchWishlist(tx: Transaction, wishlist: Wishlist) {
   if (!wishlist.active) return 0;
   const customer = await tx.customer.findUnique({
     where: { id: wishlist.customerId },
-    select: { optedOut: true },
+    select: { optedOut: true, marketingConsent: true },
   });
-  if (!customer || customer.optedOut) return 0;
+  if (!customer || customer.optedOut || !customer.marketingConsent) return 0;
+  if ((await customersWithRecentMessages(tx, [wishlist.customerId])).has(wishlist.customerId)) return 0;
   const items = await tx.stockItem.findMany({ where: { status: "AVAILABLE" } });
   const matchingItems = items.filter((item) => matchesWishlist(wishlist, item));
-  await createMissingNotifications(tx, matchingItems.map((item) => ({ stockItemId: item.id, customerId: wishlist.customerId })));
-  return matchingItems.length;
+  const item = matchingItems[0];
+  if (!item) return 0;
+  return createMissingNotifications(tx, [{ stockItemId: item.id, customerId: wishlist.customerId }]);
 }

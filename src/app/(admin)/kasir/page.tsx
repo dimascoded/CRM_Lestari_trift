@@ -3,7 +3,7 @@ import { registerCustomer, recordTransaction } from "@/app/actions";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
-import { normalizeWhatsApp, REDEMPTION_DISCOUNT_PERCENT, STAMP_MINIMUM_TRANSACTION, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
+import { MESSAGE_CONSENT_TEXT, normalizeWhatsApp, REDEMPTION_DISCOUNT_PERCENT, STAMP_MINIMUM_TRANSACTION, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -65,13 +65,14 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
       {showNewCustomer ? (
         <section className="form-card cashier-form">
           <h2>Daftarkan pelanggan</h2>
-          <p>Pendaftaran hanya memerlukan nama dan nomor WhatsApp. Nomor diperiksa di seluruh cabang.</p>
+          <p>Nama dan nomor WhatsApp wajib. Persetujuan pesan bersifat opsional dan tidak dicentang otomatis.</p>
           <form action={registerCustomer}>
             <div className="form-grid">
               <div className="field"><label htmlFor="customer-name">Nama pelanggan</label><input id="customer-name" name="name" required maxLength={100} placeholder="Contoh: Dinda Putri" /></div>
               <div className="field"><label htmlFor="customer-whatsapp">Nomor WhatsApp</label><input id="customer-whatsapp" name="whatsapp" required inputMode="tel" placeholder="08xx atau +62..." /></div>
               <div className="field full"><label htmlFor="registration-branch">Cabang pendaftaran</label><select id="registration-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>
             </div>
+            <label className="checkbox-field"><input type="checkbox" name="marketingConsent" /> Pelanggan menyatakan setuju: “{MESSAGE_CONSENT_TEXT}”</label>
             <div className="form-actions"><button className="button" type="submit">Daftarkan pelanggan</button><Link className="button secondary" href="/kasir">Batal</Link></div>
           </form>
         </section>

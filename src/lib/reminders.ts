@@ -32,7 +32,9 @@ async function customersForTemplate(template: ReminderTemplate, now: Date) {
   const cooldown = daysBefore(REMINDER_COOLDOWN_DAYS, now);
   const where = {
     optedOut: false,
+    marketingConsent: true,
     reminderLogs: { none: { sentAt: { gte: cooldown } } },
+    stockNotifications: { none: { sentAt: { gte: cooldown } } },
     ...(template.segment === "NEW" ? { transactions: { none: {} } } : {}),
   };
   if (template.segment !== "PERSONAL") {
@@ -72,7 +74,9 @@ export async function processDueReminders(templateId?: string) {
         where: {
           id: { in: dueCustomers.map(({ id }) => id) },
           optedOut: false,
+          marketingConsent: true,
           reminderLogs: { none: { sentAt: { gte: cooldown } } },
+          stockNotifications: { none: { sentAt: { gte: cooldown } } },
           ...(template.segment === "NEW" ? { transactions: { none: {} } } : {}),
         },
         include: template.segment === "PERSONAL"

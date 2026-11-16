@@ -32,8 +32,8 @@ npm run test:regression
 
 1. **Fondasi data dan UI:** model cabang, akun, pelanggan, transaksi, stamp, stok, wishlist, dan reminder; shell navigasi responsif; data demo.
 2. **Pelanggan dan loyalitas:** pencarian terpisah dari pendaftaran, transaksi, diskon otomatis tiga stamp, dan satu stamp per hari.
-3. **Stok dan portal:** konfirmasi stok harian, katalog publik baca-saja, wishlist pelanggan, profil, opt-out, serta notifikasi simulasi.
-4. **Marketing dan laporan:** reminder sesuai kebiasaan beli, batas kirim tujuh hari, tab laporan, dan KPI BDN.
+3. **Stok dan portal:** konfirmasi stok harian, katalog publik baca-saja, wishlist pelanggan, profil, persetujuan pesan tercatat, serta notifikasi simulasi.
+4. **Marketing dan laporan:** reminder sesuai kebiasaan beli, maksimal satu pesan gabungan per pelanggan dalam tujuh hari, tab laporan, dan KPI BDN.
 5. **Akses:** login staf dengan akun terprovisi, sesi server-side, dan pemeriksaan peran/cabang; OTP pelanggan hanya simulasi lokal sampai provider WhatsApp tersedia.
 
 Tahap 1–5 tersedia sebagai purwarupa lokal. Integrasi OTP pelanggan dan WhatsApp masih diperlukan sebelum sistem dipakai dengan data pelanggan nyata.
@@ -51,6 +51,8 @@ Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `
 - Nominal minimum transaksi untuk mendapat stamp adalah **Rp150.000**.
 - Penukaran tiga stamp memberi diskon **10%**.
 - Aturan stamp disimpan di `src/lib/business-rules.ts`.
+- Pesan memerlukan persetujuan eksplisit. Pendaftaran kasir tidak memilih persetujuan otomatis; persetujuan dan pencabutan dicatat beserta sumber, versi teks, dan waktunya. Pelanggan lama dimigrasikan tanpa persetujuan.
+- Batas satu pesan per tujuh hari berlaku gabungan untuk reminder dan notifikasi wishlist, bukan satu batas terpisah per jenis pesan.
 - Semua pengiriman WhatsApp hanya simulasi dalam database; integrasi WhatsApp eksternal tidak digunakan.
 - `/api/cron/reminders` memproses reminder yang jatuh tempo. Lindungi endpoint ini sebelum mengeksposnya ke internet; belum ada integrasi `node-cron` atau autentikasi cron.
 - Data pelanggan dan katalog pada database lokal hanyalah data contoh sintetis.

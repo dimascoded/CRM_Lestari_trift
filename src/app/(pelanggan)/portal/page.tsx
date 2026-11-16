@@ -4,7 +4,7 @@ import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { StockCatalog } from "@/components/StockCatalog";
 import { getCustomerSession } from "@/lib/auth";
-import { REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
+import { MESSAGE_CONSENT_TEXT, REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -155,7 +155,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
 
       {tab === "profil" && (
         <section className="form-card portal-section">
-          <h2>Profil dan preferensi pesan</h2><p>Data tambahan bersifat opsional. Anda dapat berhenti menerima reminder kapan saja.</p>
+          <h2>Profil dan preferensi pesan</h2><p>Data tambahan bersifat opsional. Persetujuan pesan: “{MESSAGE_CONSENT_TEXT}”</p>
           <form action={updateCustomerProfile}>
             <div className="form-grid">
               <div className="field"><label htmlFor="favorite-category">Kategori favorit</label><input id="favorite-category" name="favoriteCategory" defaultValue={customer.favoriteCategory ?? ""} /></div>
@@ -166,8 +166,11 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
             <div className="form-actions"><button className="button secondary" type="submit">Simpan profil</button></div>
           </form>
           <div className="section-spacer">
-            <form action={updateMessagePreference}><input type="hidden" name="optedOut" value={String(!customer.optedOut)} /><button className={`button small ${customer.optedOut ? "secondary" : "danger"}`} type="submit">{customer.optedOut ? "Aktifkan reminder kembali" : "Berhenti menerima pesan"}</button></form>
-            <p className="field-hint profile-status">Status: {customer.optedOut ? "opt-out, tidak menerima pesan" : "dapat menerima pesan yang memenuhi aturan"}</p>
+            <form action={updateMessagePreference}>
+              <label className="checkbox-field"><input type="checkbox" name="marketingConsent" defaultChecked={customer.marketingConsent && !customer.optedOut} /> Saya menyetujui pesan di atas.</label>
+              <div className="form-actions"><button className="button secondary" type="submit">Simpan persetujuan pesan</button></div>
+            </form>
+            <p className="field-hint profile-status">Status: {customer.marketingConsent && !customer.optedOut ? "setuju menerima pesan" : customer.optedOut ? "berhenti menerima pesan" : "belum menyetujui pesan"}</p>
           </div>
         </section>
       )}

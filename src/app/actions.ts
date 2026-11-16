@@ -15,11 +15,9 @@ import {
   STAFF_ROLES,
   staffHomePath,
 } from "@/lib/auth";
-import {
-  normalizeWhatsApp,
-} from "@/lib/business-rules";
+import { normalizeWhatsApp } from "@/lib/business-rules";
 import { generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode, verifyPassword } from "@/lib/password";
-import { registerCustomerRecord } from "@/lib/customer-service";
+import { registerCustomerRecord, setCustomerMarketingConsent } from "@/lib/customer-service";
 import { matchStockItem, matchWishlist } from "@/lib/wishlist-match";
 import { processDueReminders } from "@/lib/reminders";
 import { confirmStockTodayRecord } from "@/lib/stock-service";
@@ -57,6 +55,7 @@ export async function registerCustomer(formData: FormData) {
   const name = formText(formData, "name");
   const whatsapp = normalizeWhatsApp(formText(formData, "whatsapp"));
   const branchId = formText(formData, "branchId");
+  const marketingConsent = formData.get("marketingConsent") === "on";
 
   if (!name || !/^\+?\d{9,15}$/.test(whatsapp) || !branchId) {
     redirect("/kasir?status=invalid-customer");
@@ -65,7 +64,7 @@ export async function registerCustomer(formData: FormData) {
     redirect("/kasir?status=invalid-customer");
   }
   requireBranchAccess(staff, branchId);
-  const result = await registerCustomerRecord(name, whatsapp, branchId);
+  const result = await registerCustomerRecord(name, whatsapp, branchId, marketingConsent);
   if (result.duplicate) {
     revalidatePath("/manajemen");
     redirect("/kasir?status=duplicate");
@@ -218,9 +217,16 @@ export async function toggleWishlist(formData: FormData) {
 export async function updateMessagePreference(formData: FormData) {
   const { customer } = await requireCustomerSession();
   const customerId = customer.id;
-  const optedOut = formText(formData, "optedOut") === "true";
+  const marketingConsent = formData.get("marketingConsent") === "on";
   if (!customerId) redirect("/portal?status=invalid-customer");
-  await db.customer.update({ where: { id: customerId }, data: { optedOut } });
+  await db.$transaction(async (tx) => {
+    const updated = await setCustomerMarketingConsent(tx, customerId, marketingConsent, "CUSTOMER_PORTAL");
+    if (!updated) redirect("/portal?status=invalid-customer");
+    if (marketingConsent) {
+      const wishlists = await tx.wishlist.findMany({ where: { customerId, active: true } });
+      for (const wishlist of wishlists) await matchWishlist(tx, wishlist);
+    }
+  });
   revalidatePath("/portal");
   revalidatePath("/manajemen");
   redirect("/portal?tab=profil&status=preference-updated");

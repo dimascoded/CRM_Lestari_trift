@@ -51,7 +51,7 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
               <td><div className="customer-cell"><span className="customer-initial">{customer.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{customer.name}</strong><small>{customer.whatsapp}</small></span></div></td>
               <td>{customer.registeredAt.name}</td><td><span className="tag">{customer.stamps.length} stamp</span></td>
               <td>{customer._count.transactions}</td><td>{customer._count.wishlists}</td>
-              <td><span className={`status ${customer.optedOut ? "neutral" : ""}`}>{customer.optedOut ? "Opt-out" : "Aktif"}</span></td>
+              <td><span className={`status ${customer.marketingConsent && !customer.optedOut ? "" : "neutral"}`}>{customer.marketingConsent && !customer.optedOut ? "Setuju" : customer.optedOut ? "Berhenti" : "Belum setuju"}</span></td>
             </tr>
           ))}{!customers.length && <tr><td className="table-empty" colSpan={6}>Tidak ada pelanggan yang cocok dengan pencarian.</td></tr>}</tbody>
         </table></div>

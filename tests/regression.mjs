@@ -21,7 +21,7 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { registerCustomerRecord }, { recordTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { registerCustomerRecord, setCustomerMarketingConsent }, { recordTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
   import("../src/lib/password.ts"),
@@ -70,13 +70,14 @@ await db.kpiTarget.createMany({
 });
 
 let customerSequence = 0;
-async function customer(name, optedOut = false) {
+async function customer(name, optedOut = false, marketingConsent = true) {
   customerSequence += 1;
   return db.customer.create({
     data: {
       name,
       whatsapp: `+628123450${String(customerSequence).padStart(4, "0")}`,
       optedOut,
+      marketingConsent,
       registeredAtId: branches[0].id,
     },
   });
@@ -98,6 +99,40 @@ test("duplicate registration is rejected and logged", async () => {
   assert.equal(duplicate.duplicate, true);
   assert.equal(await db.customer.count({ where: { whatsapp: first.whatsapp } }), 1);
   assert.equal(await db.duplicateCheckLog.count({ where: { existingCustomerId: first.id } }), 1);
+});
+
+test("customer messaging consent is explicitly recorded at registration", async () => {
+  const consented = await registerCustomerRecord("Setuju Pesan", "+628123459001", branches[0].id, true);
+  const declined = await registerCustomerRecord("Belum Setuju", "+628123459002", branches[0].id, false);
+  assert.equal(consented.duplicate, false);
+  assert.equal(consented.customer.marketingConsent, true);
+  assert.equal(consented.customer.optedOut, false);
+  assert.equal(declined.duplicate, false);
+  assert.equal(declined.customer.marketingConsent, false);
+  assert.equal(declined.customer.optedOut, false);
+  const consentLog = await db.messageConsent.findFirst({ where: { customerId: consented.customer.id } });
+  const declineLog = await db.messageConsent.findFirst({ where: { customerId: declined.customer.id } });
+  assert.equal(consentLog?.status, "GRANTED");
+  assert.equal(consentLog?.source, "CASHIER_REGISTRATION");
+  assert.equal(consentLog?.policyVersion, MESSAGE_CONSENT_POLICY_VERSION);
+  assert.ok(consentLog?.consentText);
+  assert.equal(declineLog?.status, "DECLINED");
+});
+
+test("revoked message consent is audited and disables future messaging", async () => {
+  const buyer = await customer("Persetujuan Dicabut");
+  await db.$transaction((tx) => setCustomerMarketingConsent(tx, buyer.id, false, "CUSTOMER_PORTAL"));
+  const updated = await db.customer.findUnique({ where: { id: buyer.id } });
+  const revokeLog = await db.messageConsent.findFirst({ where: { customerId: buyer.id }, orderBy: { createdAt: "desc" } });
+  assert.equal(updated?.marketingConsent, false);
+  assert.equal(updated?.optedOut, true);
+  assert.equal(revokeLog?.status, "REVOKED");
+  assert.equal(revokeLog?.source, "CUSTOMER_PORTAL");
+
+  const item = await db.stockItem.create({ data: { name: "Rok Plisket", category: "Bawahan", size: "M", branchId: branches[0].id } });
+  const wishlist = await db.wishlist.create({ data: { customerId: buyer.id, category: "Bawahan", size: "M" } });
+  assert.equal(await db.$transaction((tx) => matchWishlist(tx, wishlist)), 0);
+  assert.equal(await db.$transaction((tx) => matchStockItem(tx, item)), 0);
 });
 
 test("below-minimum and same-day purchases do not issue an extra stamp", async () => {
@@ -169,19 +204,47 @@ test("wishlist created after matching stock creates one notification, including 
   assert.equal(await db.stockMatchNotification.count({ where: { customerId: buyer.id, stockItemId: item.id } }), 1);
 });
 
-test("scheduled reminders honor opt-out, cooldown, and personalized due windows", async () => {
+test("wishlist notifications require consent and share the seven-day messaging cooldown", async () => {
+  const itemOne = await db.stockItem.create({ data: { name: "Jaket Denim", category: "Outer", size: "L", branchId: branches[0].id } });
+  const itemTwo = await db.stockItem.create({ data: { name: "Jaket Canvas", category: "Outer", size: "L", branchId: branches[1].id } });
+  const consented = await customer("Consent Wishlist");
+  const wishlist = await db.wishlist.create({ data: { customerId: consented.id, category: "Outer", size: "L" } });
+  assert.equal(await db.$transaction((tx) => matchWishlist(tx, wishlist)), 1);
+  assert.equal(await db.$transaction((tx) => matchStockItem(tx, itemTwo)), 0);
+  assert.equal(await db.stockMatchNotification.count({ where: { customerId: consented.id } }), 1);
+
+  const noConsent = await customer("Tanpa Consent Wishlist", false, false);
+  const noConsentWishlist = await db.wishlist.create({ data: { customerId: noConsent.id, category: "Outer", size: "L" } });
+  assert.equal(await db.$transaction((tx) => matchWishlist(tx, noConsentWishlist)), 0);
+  assert.equal(await db.$transaction((tx) => matchStockItem(tx, itemOne)), 0);
+  assert.equal(await db.stockMatchNotification.count({ where: { customerId: noConsent.id } }), 0);
+
+  const recentReminder = await customer("Reminder Baru");
+  const template = await db.reminderTemplate.create({ data: { name: "Wishlist cooldown", segment: "ALL", message: "Reminder" } });
+  await db.reminderLog.create({ data: { customerId: recentReminder.id, templateId: template.id } });
+  const recentWishlist = await db.wishlist.create({ data: { customerId: recentReminder.id, category: "Outer", size: "L" } });
+  assert.equal(await db.$transaction((tx) => matchWishlist(tx, recentWishlist)), 0);
+});
+
+test("scheduled reminders require consent and share cooldown with stock notifications", async () => {
   const template = await db.reminderTemplate.create({ data: { name: "Umum uji", segment: "ALL", message: "Hai {nama}, kabar baru." } });
   const eligible = await customer("Ayu Uji Reminder");
   const optedOut = await customer("Opt Out Uji", true);
+  const noConsent = await customer("Belum Consent Reminder", false, false);
   const recent = await customer("Cooldown Uji");
+  const stockMessaged = await customer("Notif Stok Baru");
   const priorTemplate = await db.reminderTemplate.create({ data: { name: "Riwayat", segment: "ALL", message: "Riwayat" } });
   await db.reminderLog.create({ data: { customerId: recent.id, templateId: priorTemplate.id, body: "terkirim", sentAt: new Date(Date.now() - 86400000) } });
+  const item = await db.stockItem.create({ data: { name: "Tas Selempang", category: "Aksesori", size: "All size", branchId: branches[0].id } });
+  await db.stockMatchNotification.create({ data: { customerId: stockMessaged.id, stockItemId: item.id } });
   const sent = await processDueReminders(template.id);
   assert.ok(sent >= 1);
   const sentLog = await db.reminderLog.findFirst({ where: { customerId: eligible.id, templateId: template.id } });
   assert.equal(sentLog?.body, "Hai Ayu, kabar baru.");
   assert.equal(await db.reminderLog.count({ where: { customerId: optedOut.id, templateId: template.id } }), 0);
+  assert.equal(await db.reminderLog.count({ where: { customerId: noConsent.id, templateId: template.id } }), 0);
   assert.equal(await db.reminderLog.count({ where: { customerId: recent.id, templateId: template.id } }), 0);
+  assert.equal(await db.reminderLog.count({ where: { customerId: stockMessaged.id, templateId: template.id } }), 0);
 
   const personal = await db.reminderTemplate.create({ data: { name: "Personal uji", segment: "PERSONAL", message: "Hai {nama}." } });
   const due = await customer("Personal Tepat Waktu");
