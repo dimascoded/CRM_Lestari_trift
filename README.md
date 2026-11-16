@@ -1,6 +1,6 @@
 # Lestari Thrift CRM
 
-Purwarupa CRM lintas cabang dengan Next.js App Router, TypeScript, SQLite, Prisma, dan Tailwind CSS.
+Purwarupa CRM lintas cabang dengan Next.js App Router, TypeScript, SQLite, Prisma, dan Tailwind CSS. Data operasional disimpan secara lokal; data seed bersifat sintetis. Pengiriman WhatsApp dan OTP hanya disimulasikan, jadi demo tidak memerlukan provider berbayar.
 
 ## Menjalankan lokal
 
@@ -13,6 +13,8 @@ npm run dev
 ```
 
 Buka `http://localhost:3000`. Perintah `db:setup` membuat tabel SQLite dan memuat data demo empat cabang. Dengan URL contoh, database lokal tersimpan di `prisma/prisma/dev.db` dan tidak masuk Git.
+
+`npm run user:create` berjalan interaktif: isi nama dan email demo, pilih peran (`OWNER` tidak memerlukan cabang), lalu buat password lokal minimal 12 karakter. Peringatan Node `MODULE_TYPELESS_PACKAGE_JSON` tidak menghentikan prompt. Jangan gunakan password atau data pelanggan nyata untuk demo.
 
 Perintah lain:
 
@@ -53,7 +55,7 @@ Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `
 - Aturan stamp disimpan di `src/lib/business-rules.ts`.
 - Pesan memerlukan persetujuan eksplisit. Pendaftaran kasir tidak memilih persetujuan otomatis; persetujuan dan pencabutan dicatat beserta sumber, versi teks, dan waktunya. Pelanggan lama dimigrasikan tanpa persetujuan.
 - Batas satu pesan per tujuh hari berlaku gabungan untuk reminder dan notifikasi wishlist, bukan satu batas terpisah per jenis pesan.
-- Semua pengiriman WhatsApp hanya simulasi dalam database; integrasi WhatsApp eksternal tidak digunakan.
+- Reminder dan notifikasi wishlist hanya membuat catatan simulasi di database; tidak ada pesan yang dikirim dan tidak diperlukan API atau biaya WhatsApp.
 - `/api/cron/reminders` memproses reminder yang jatuh tempo. Lindungi endpoint ini sebelum mengeksposnya ke internet; belum ada integrasi `node-cron` atau autentikasi cron.
 - Data pelanggan dan katalog pada database lokal hanyalah data contoh sintetis.
 - `npm run test:regression` membuat dan menghapus hanya database uji terisolasi `prisma/prisma/regression-test.db`; database demo lokal tidak disentuh.
@@ -67,6 +69,6 @@ Gunakan baseline enam bulan sebelum roll-out dan evaluasi hasil pada enam bulan 
 - **Repeat purchase +25%:** jumlah pelanggan dengan lebih dari satu transaksi pada periode ukur dibanding baseline sejenis; contoh seed 40 menjadi 50.
 - **Update stok ≥90%:** hari-cabang dengan pencatatan stok aktual dibagi seluruh hari-cabang yang wajib diperbarui. Konfirmasi tanpa pencatatan stok bukan pembaruan aktual.
 - **Stok mati turun 20%:** jumlah stok mati di akhir periode dibanding baseline; contoh seed 25 menjadi maksimal 20.
-- **Reminder tepat jadwal ≥95%:** pesan yang benar-benar terkirim dalam toleransi jadwal dibagi seluruh pesan yang jatuh tempo. Toleransi 60 menit masih asumsi purwarupa dan perlu disahkan sebelum evaluasi.
+- **Reminder tepat jadwal ≥95%:** simulasi reminder yang dicatat dalam rentang ±60 menit dari jadwal dibagi seluruh simulasi yang memiliki jadwal. Ini bukan bukti pengiriman WhatsApp; toleransi 60 menit masih asumsi purwarupa.
 - **Frekuensi belanja +15%:** transaksi per pelanggan aktif per 30 hari dibanding baseline sejenis; contoh seed 1,6 menjadi 1,84.
-- **Konversi reminder ≥20%:** pelanggan unik yang bertransaksi dalam 7 hari setelah pesan diterima dibagi pelanggan unik yang menerima pesan.
+- **Konversi reminder ≥20%:** pelanggan unik yang bertransaksi dalam 7 hari setelah simulasi reminder dicatat dibagi pelanggan unik dengan simulasi reminder tercatat. Ini bukan pengukuran delivery nyata.

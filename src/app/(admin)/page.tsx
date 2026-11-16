@@ -24,7 +24,7 @@ async function DashboardContent() {
       orderBy: [{ rolloutStage: "asc" }, { name: "asc" }],
       include: {
         stockItems: { where: { status: "AVAILABLE" }, select: { id: true } },
-        stockUpdateLogs: { orderBy: { updatedAt: "desc" }, take: 1 },
+        stockUpdateLogs: { where: { type: "CHANGE" }, orderBy: { updatedAt: "desc" }, take: 1 },
       },
     }),
     db.transaction.findMany({
@@ -54,7 +54,7 @@ async function DashboardContent() {
       </div>
 
       <section className="table-card section-spacer">
-        <div className="table-titlebar"><div><h2>Indikator target BDN</h2><p>Capaian aktual dibanding baseline dan sasaran.</p></div></div>
+        <div className="table-titlebar"><div><h2>Indikator target BDN</h2><p>Capaian simulasi dari data demo lokal dibanding baseline dan sasaran.</p></div></div>
         <div className="table-scroll">
           <table><thead><tr><th>KODE</th><th>INDIKATOR</th><th>BASELINE</th><th>TARGET</th><th>CAPAIAN</th><th>STATUS</th></tr></thead>
             <tbody>{kpis.map((kpi) => (

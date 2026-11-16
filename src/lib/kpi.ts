@@ -54,7 +54,10 @@ export async function getKpis(): Promise<KpiRow[]> {
       where: { createdAt: { gte: start30 } },
       _count: { _all: true },
     }),
-    db.stockUpdateLog.findMany({ where: { updatedAt: { gte: start7 } }, select: { branchId: true, updatedAt: true } }),
+    db.stockUpdateLog.findMany({
+      where: { type: "CHANGE", updatedAt: { gte: start7 } },
+      select: { branchId: true, updatedAt: true },
+    }),
     db.stockItem.count({ where: { status: "AVAILABLE", enteredAt: { lt: daysBefore(DEAD_STOCK_DAYS, now) } } }),
     db.reminderLog.findMany({
       where: { sentAt: { gte: start30 }, status: "SENT" },
@@ -79,7 +82,7 @@ export async function getKpis(): Promise<KpiRow[]> {
   ).size;
   const onTimeLogs = reminderLogs.filter(({ scheduledFor }) => scheduledFor !== null);
   const onTimeCount = onTimeLogs.filter(({ sentAt, scheduledFor }) =>
-    scheduledFor !== null && (sentAt.getTime() - scheduledFor.getTime()) / 60000 <= ON_TIME_MINUTES,
+    scheduledFor !== null && Math.abs(sentAt.getTime() - scheduledFor.getTime()) / 60000 <= ON_TIME_MINUTES,
   ).length;
   const remindedCustomerIds = [...new Set(reminderLogs.map(({ customerId }) => customerId))];
   const conversionTransactions = remindedCustomerIds.length

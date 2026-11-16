@@ -226,6 +226,31 @@ test("wishlist notifications require consent and share the seven-day messaging c
   assert.equal(await db.$transaction((tx) => matchWishlist(tx, recentWishlist)), 0);
 });
 
+test("reminder punctuality KPI counts early and late sends symmetrically", async () => {
+  const template = await db.reminderTemplate.create({ data: { name: "Jadwal KPI", segment: "ALL", message: "Reminder" } });
+  const early = await customer("Reminder Terlalu Awal");
+  const withinWindow = await customer("Reminder Dalam Toleransi");
+  const now = new Date();
+  await db.reminderLog.create({
+    data: {
+      customerId: early.id,
+      templateId: template.id,
+      scheduledFor: new Date(now.getTime() + 2 * 60 * 60 * 1000),
+      sentAt: now,
+    },
+  });
+  await db.reminderLog.create({
+    data: {
+      customerId: withinWindow.id,
+      templateId: template.id,
+      scheduledFor: new Date(now.getTime() + 30 * 60 * 1000),
+      sentAt: now,
+    },
+  });
+  const punctuality = (await getKpis()).find(({ code }) => code === "S6");
+  assert.equal(punctuality?.value, 50);
+});
+
 test("scheduled reminders require consent and share cooldown with stock notifications", async () => {
   const template = await db.reminderTemplate.create({ data: { name: "Umum uji", segment: "ALL", message: "Hai {nama}, kabar baru." } });
   const eligible = await customer("Ayu Uji Reminder");
@@ -267,6 +292,9 @@ test("daily stock confirmation is recorded and KPI returns eight target rows", a
   const kpis = await getKpis();
   assert.deepEqual(kpis.map(({ code }) => code), ["S1", "S2", "S3", "S4", "S5", "S6", "S7a", "S7b"]);
   assert.ok(kpis.every(({ status }) => ["Tercapai", "Berjalan", "Belum"].includes(status)));
+  assert.equal(kpis.find(({ code }) => code === "S4")?.value, 0);
+  await db.stockUpdateLog.create({ data: { branchId: branches[0].id, type: "CHANGE" } });
+  assert.ok((await getKpis()).find(({ code }) => code === "S4")?.value > 0);
 });
 
 after(async () => {

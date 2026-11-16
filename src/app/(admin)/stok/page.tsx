@@ -57,8 +57,16 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
       : Promise.resolve([]),
   ]);
   const branchCountMap = new Map(branchCounts.map(({ branchId: id, _count }) => [id, _count._all]));
-  const lastLogByBranch = new Map<string, (typeof branchLogs)[number]>();
-  for (const log of branchLogs) if (!lastLogByBranch.has(log.branchId)) lastLogByBranch.set(log.branchId, log);
+  const lastChangeByBranch = new Map<string, Date>();
+  const confirmedTodayBranches = new Set<string>();
+  for (const log of branchLogs) {
+    if (log.type === "CHANGE" && !lastChangeByBranch.has(log.branchId)) {
+      lastChangeByBranch.set(log.branchId, log.updatedAt);
+    }
+    if (log.type === "CONFIRM" && jakartaDayKey(log.updatedAt) === today) {
+      confirmedTodayBranches.add(log.branchId);
+    }
+  }
   const categories = categoryRows.map(({ category: itemCategory }) => itemCategory);
 
   return (
@@ -73,14 +81,16 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
 
       <section className="branch-update-grid section-spacer">
         {branches.map((branch) => {
-          const lastLog = lastLogByBranch.get(branch.id);
-          const confirmed = lastLog ? jakartaDayKey(lastLog.updatedAt) === today : false;
+          const lastChange = lastChangeByBranch.get(branch.id);
+          const changedToday = lastChange ? jakartaDayKey(lastChange) === today : false;
+          const confirmedToday = confirmedTodayBranches.has(branch.id);
           return (
             <article className="branch-update-card" key={branch.id}>
-              <div className="branch-update-heading"><strong>{branch.name}</strong><span className={`status ${confirmed ? "" : "warning"}`}>{confirmed ? "Diperbarui hari ini" : "Perlu update"}</span></div>
+              <div className="branch-update-heading"><strong>{branch.name}</strong><span className={`status ${changedToday ? "" : "warning"}`}>{changedToday ? "Ada perubahan hari ini" : "Belum ada perubahan hari ini"}</span></div>
               <p>{branchCountMap.get(branch.id) ?? 0} barang tersedia</p>
-              <small>Update terakhir: {lastLog ? new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(lastLog.updatedAt) : "Belum ada"}</small>
-              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><button className="button small secondary" type="submit">Konfirmasi stok hari ini</button></form>
+              <small>Perubahan katalog terakhir: {lastChange ? new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(lastChange) : "Belum ada"}</small>
+              <small>Konfirmasi stok: {confirmedToday ? "Sudah dicatat hari ini" : "Belum dicatat hari ini"}</small>
+              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><button className="button small secondary" type="submit">{confirmedToday ? "Catat konfirmasi ulang" : "Konfirmasi stok hari ini"}</button></form>
             </article>
           );
         })}

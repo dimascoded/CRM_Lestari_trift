@@ -43,7 +43,7 @@ export function Notice({
 }) {
   if (!status) return null;
   if (status === "campaign-sent") {
-    return <div className="notice success">Simulasi reminder selesai. {detail ?? "0"} pelanggan menerima pesan.</div>;
+    return <div className="notice success">Simulasi reminder selesai untuk {detail ?? "0"} pelanggan; tidak ada pesan WhatsApp yang dikirim.</div>;
   }
   const message = messages[status];
   if (!message) return null;

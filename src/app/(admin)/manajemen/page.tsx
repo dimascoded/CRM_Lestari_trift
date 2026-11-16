@@ -106,17 +106,17 @@ async function PerformanceTab() {
   return (
     <>
       <div className="metric-strip">
-        <Metric label="Reminder terkirim · 30 hari" value={logs.length} />
-        <Metric label="Konversi pembelian · 7 hari" value={`${kpi("S7b").toLocaleString("id-ID", { maximumFractionDigits: 1 })}% · ${converted} pelanggan`} />
+        <Metric label="Reminder simulasi · 30 hari" value={logs.length} />
+        <Metric label="Konversi setelah simulasi · 7 hari" value={`${kpi("S7b").toLocaleString("id-ID", { maximumFractionDigits: 1 })}% · ${converted} pelanggan`} />
         <Metric label="Pelanggan repeat · 30 hari" value={repeatCount} />
         <Metric label="Transaksi / pelanggan aktif" value={kpi("S7a").toLocaleString("id-ID", { maximumFractionDigits: 2 })} />
       </div>
       <section className="table-card section-spacer">
-        <div className="table-titlebar"><div><h2>Log pengiriman</h2><p>Pengiriman dan transaksi pelanggan dalam 30 hari terakhir.</p></div></div>
-        <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>TEMPLATE</th><th>WAKTU KIRIM</th><th>STATUS</th><th>KONVERSI 7 HARI</th></tr></thead>
+        <div className="table-titlebar"><div><h2>Log reminder simulasi</h2><p>Catatan simulasi dan transaksi pelanggan dalam 30 hari terakhir; bukan bukti delivery WhatsApp.</p></div></div>
+        <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>TEMPLATE</th><th>WAKTU SIMULASI</th><th>STATUS</th><th>KONVERSI SETELAH SIMULASI</th></tr></thead>
           <tbody>{logs.map((log) => {
             const convertedAfter = transactions.some(({ customerId, createdAt }) => customerId === log.customerId && createdAt > log.sentAt && createdAt <= new Date(log.sentAt.getTime() + 7 * 86400000));
-            return <tr key={log.id}><td>{log.customer.name}</td><td>{log.template.name}</td><td>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.sentAt)}</td><td>{log.status}</td><td>{convertedAfter ? "Ya" : "Belum"}</td></tr>;
+            return <tr key={log.id}><td>{log.customer.name}</td><td>{log.template.name}</td><td>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.sentAt)}</td><td>Simulasi dicatat</td><td>{convertedAfter ? "Ya" : "Belum"}</td></tr>;
           })}{!logs.length && <tr><td className="table-empty" colSpan={5}>Belum ada pengiriman dalam 30 hari terakhir.</td></tr>}</tbody>
         </table></div>
       </section>
@@ -131,7 +131,10 @@ async function StockTab() {
   const recentDayKeys = new Set(Array.from({ length: 7 }, (_, index) => jakartaDayKey(daysBefore(6 - index, now))));
   const [branches, logs, stampGroups, deadItems] = await Promise.all([
     db.branch.findMany({ orderBy: { name: "asc" } }),
-    db.stockUpdateLog.findMany({ where: { updatedAt: { gte: since7 } }, select: { branchId: true, updatedAt: true } }),
+    db.stockUpdateLog.findMany({
+      where: { type: "CHANGE", updatedAt: { gte: since7 } },
+      select: { branchId: true, updatedAt: true },
+    }),
     db.stamp.groupBy({ by: ["branchId"], where: { dayKey: today }, _count: { _all: true } }),
     db.stockItem.findMany({
       where: { status: "AVAILABLE", enteredAt: { lt: daysBefore(DEAD_STOCK_DAYS, now) } },
@@ -151,7 +154,7 @@ async function StockTab() {
   return (
     <>
       <section className="table-card">
-        <div className="table-titlebar"><div><h2>Kepatuhan update stok cabang</h2><p>Hari dengan update dalam tujuh hari terakhir · termasuk konfirmasi.</p></div></div>
+        <div className="table-titlebar"><div><h2>Kepatuhan update stok cabang</h2><p>Hari dengan perubahan katalog aktual dalam tujuh hari terakhir. Konfirmasi saja tidak dihitung sebagai update.</p></div></div>
         <div className="table-scroll"><table><thead><tr><th>CABANG</th><th>UPDATE</th><th>KEPATUHAN 7 HARI</th><th>STAMP HARI INI</th><th>STATUS HARI INI</th></tr></thead>
           <tbody>{branches.map((branch) => {
             const days = updatedDays.get(branch.id)?.size ?? 0;
