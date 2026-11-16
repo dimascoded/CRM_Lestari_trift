@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, ON_TIME_MINUTES } from "./business-rules";
+import { SIMULATED_SENT_STATUS, describeMessageStatus } from "./message-status";
 
 type KpiCode = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7a" | "S7b";
 
@@ -48,10 +49,10 @@ export async function getKpis(): Promise<KpiRow[]> {
     db.customer.count(),
     db.customer.groupBy({ by: ["whatsapp"], _count: { _all: true } }),
     db.duplicateCheckLog.count(),
-    db.redemption.groupBy({ by: ["branchId"] }),
+    db.redemption.groupBy({ by: ["branchId"], where: { voidedAt: null } }),
     db.transaction.groupBy({
       by: ["customerId"],
-      where: { createdAt: { gte: start30 } },
+      where: { createdAt: { gte: start30 }, voidRecord: null },
       _count: { _all: true },
     }),
     db.stockUpdateLog.findMany({
@@ -60,11 +61,11 @@ export async function getKpis(): Promise<KpiRow[]> {
     }),
     db.stockItem.count({ where: { status: "AVAILABLE", enteredAt: { lt: daysBefore(DEAD_STOCK_DAYS, now) } } }),
     db.reminderLog.findMany({
-      where: { sentAt: { gte: start30 }, status: "SENT" },
-      select: { customerId: true, sentAt: true, scheduledFor: true },
+      where: { sentAt: { gte: start30 }, status: SIMULATED_SENT_STATUS },
+      select: { customerId: true, sentAt: true, scheduledFor: true, status: true },
     }),
-    db.transaction.count({ where: { createdAt: { gte: start30 } } }),
-    db.transaction.groupBy({ by: ["customerId"], where: { createdAt: { gte: start30 } } }),
+    db.transaction.count({ where: { createdAt: { gte: start30 }, voidRecord: null } }),
+    db.transaction.groupBy({ by: ["customerId"], where: { createdAt: { gte: start30 }, voidRecord: null } }),
   ]);
   if (targets.length !== 8) throw new Error(`Expected 8 KPI targets, found ${targets.length}. Run the database seed.`);
 
@@ -80,7 +81,9 @@ export async function getKpis(): Promise<KpiRow[]> {
       .filter(({ updatedAt }) => recentDayKeys.has(jakartaDayKey(updatedAt)))
       .map(({ branchId, updatedAt }) => `${branchId}:${jakartaDayKey(updatedAt)}`),
   ).size;
-  const onTimeLogs = reminderLogs.filter(({ scheduledFor }) => scheduledFor !== null);
+  const onTimeLogs = reminderLogs.filter(({ scheduledFor, status }) =>
+    scheduledFor !== null && describeMessageStatus(status).isSimulated,
+  );
   const onTimeCount = onTimeLogs.filter(({ sentAt, scheduledFor }) =>
     scheduledFor !== null && Math.abs(sentAt.getTime() - scheduledFor.getTime()) / 60000 <= ON_TIME_MINUTES,
   ).length;
@@ -90,6 +93,7 @@ export async function getKpis(): Promise<KpiRow[]> {
         where: {
           customerId: { in: remindedCustomerIds },
           createdAt: { gte: start37 },
+          voidRecord: null,
         },
         select: { customerId: true, createdAt: true },
       })

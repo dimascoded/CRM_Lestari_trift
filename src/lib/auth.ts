@@ -3,13 +3,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Customer, User } from "@prisma/client";
 import { db } from "@/lib/db";
+import { writeAuditLog } from "@/lib/audit-service";
+import { STAFF_ROLES, type StaffRole } from "./staff-roles";
 
 const STAFF_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const CUSTOMER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_CODE_TTL_MS = 5 * 60 * 1000;
 
-export const STAFF_ROLES = ["CASHIER", "STOCK_STAFF", "MANAGER", "MARKETING", "OWNER"] as const;
-export type StaffRole = (typeof STAFF_ROLES)[number];
+export { STAFF_ROLES, type StaffRole } from "./staff-roles";
 const STAFF_HOME: Record<StaffRole, string> = {
   CASHIER: "/kasir",
   STOCK_STAFF: "/stok",
@@ -50,12 +51,23 @@ export function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function createStaffSession(userId: string) {
+export async function createStaffSession(userId: string, branchId: string | null) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + STAFF_SESSION_TTL_MS);
-  const session = await db.userSession.create({
-    data: { userId, tokenHash: hashSessionToken(token), expiresAt },
-    select: { id: true },
+  const session = await db.$transaction(async (tx) => {
+    const created = await tx.userSession.create({
+      data: { userId, tokenHash: hashSessionToken(token), expiresAt },
+      select: { id: true },
+    });
+    await writeAuditLog(tx, {
+      userId,
+      action: "STAFF_LOGIN",
+      entity: "STAFF_SESSION",
+      entityId: created.id,
+      branchId,
+      summary: "Staf berhasil masuk.",
+    });
+    return created;
   });
   const cookieStore = await cookies();
   cookieStore.set(staffCookieName(), token, cookieOptions(expiresAt));
@@ -74,6 +86,7 @@ export async function getStaffSession(): Promise<StaffSession | null> {
   if (
     !session ||
     session.expiresAt <= new Date() ||
+    !session.user.active ||
     !session.user.passwordHash ||
     !STAFF_ROLES.includes(session.user.role as StaffRole)
   ) {
@@ -115,7 +128,23 @@ export async function logoutStaffSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get(staffCookieName())?.value;
   if (token) {
-    await db.userSession.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
+    const session = await db.userSession.findUnique({
+      where: { tokenHash: hashSessionToken(token) },
+      select: { id: true, userId: true, user: { select: { branchId: true } } },
+    });
+    if (session) {
+      await db.$transaction(async (tx) => {
+        await tx.userSession.deleteMany({ where: { id: session.id } });
+        await writeAuditLog(tx, {
+          userId: session.userId,
+          action: "STAFF_LOGOUT",
+          entity: "STAFF_SESSION",
+          entityId: session.id,
+          branchId: session.user.branchId,
+          summary: "Staf keluar.",
+        });
+      });
+    }
   }
   cookieStore.delete(staffCookieName());
 }
@@ -139,7 +168,7 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
     where: { tokenHash: hashSessionToken(token) },
     include: { customer: true },
   });
-  if (!session || session.expiresAt <= new Date()) {
+  if (!session || session.expiresAt <= new Date() || !session.customer.active) {
     return null;
   }
   return { id: session.id, customer: session.customer };

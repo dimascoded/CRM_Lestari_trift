@@ -1,10 +1,13 @@
 import Link from "next/link";
-import { addStockItem, confirmStockToday, markStockSold, updateStockItem } from "@/app/actions";
+import { addStockItem, confirmStockToday, markStockSold, removeStockItem, restoreStockItem, updateStockItem } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
-import { currentTime, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey } from "@/lib/business-rules";
+import { currentTime, DEFAULT_STOCK_NOTIFICATION_MESSAGE, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
 import { db } from "@/lib/db";
+import { renderStockNotificationMessage } from "@/lib/wishlist-match";
+import { describeMessageStatus } from "@/lib/message-status";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -13,13 +16,15 @@ export default function StockPage({ searchParams }: { searchParams: SearchParams
 }
 
 async function StockContent({ searchParams }: { searchParams: SearchParams }) {
-  await requireStaffPage(["OWNER", "MANAGER", "STOCK_STAFF"]);
+  const staff = await requireStaffPage(["OWNER", "MANAGER", "STOCK_STAFF"]);
   const params = await searchParams;
   const status = typeof params.status === "string" ? params.status : undefined;
   const detail = typeof params.matches === "string" ? params.matches : undefined;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const branchId = typeof params.branch === "string" ? params.branch : "";
   const category = typeof params.category === "string" ? params.category : "";
+  const requestedStatus = typeof params.itemStatus === "string" ? params.itemStatus : "";
+  const itemStatus = ["AVAILABLE", "SOLD", "REMOVED"].includes(requestedStatus) ? requestedStatus : "";
   const activeTab = params.tab === "log" ? "log" : "notifikasi";
   const editId = typeof params.edit === "string" ? params.edit : "";
   const showAdd = params.add === "1";
@@ -34,6 +39,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
       where: {
         ...(branchId ? { branchId } : {}),
         ...(category ? { category } : {}),
+        ...(itemStatus ? { status: itemStatus } : {}),
         ...(query ? { OR: [{ name: { contains: query } }, { category: { contains: query } }] } : {}),
       },
       include: { branch: true },
@@ -47,6 +53,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
     editId ? db.stockItem.findUnique({ where: { id: editId } }) : Promise.resolve(null),
     activeTab === "notifikasi"
       ? db.stockMatchNotification.findMany({
+          where: staff.role === "OWNER" ? {} : { stockItem: { branchId: staff.branchId ?? "" } },
           include: { customer: true, stockItem: { include: { branch: true } } },
           orderBy: { sentAt: "desc" },
           take: 12,
@@ -57,6 +64,8 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
       : Promise.resolve([]),
   ]);
   const branchCountMap = new Map(branchCounts.map(({ branchId: id, _count }) => [id, _count._all]));
+  const managedBranches = staff.role === "OWNER" ? branches : branches.filter(({ id }) => id === staff.branchId);
+  const editableItem = editItem && (staff.role === "OWNER" || editItem.branchId === staff.branchId) ? editItem : null;
   const lastChangeByBranch = new Map<string, Date>();
   const confirmedTodayBranches = new Set<string>();
   for (const log of branchLogs) {
@@ -71,7 +80,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
 
   return (
     <div className="page-content">
-      <PageHeader eyebrow="OPERASIONAL · INVENTARIS" title="Katalog stok lintas cabang" description="Kelola stok dan konfirmasi pembaruan harian per cabang." action={<Link className="button" href="/stok?add=1">＋ Tambah barang</Link>} />
+      <PageHeader eyebrow="OPERASIONAL · INVENTARIS" title="Katalog stok lintas cabang" description="Tambah, ubah, tandai terjual, dan arsipkan barang tanpa menghapus riwayat." action={<Link className="button" href="/stok?add=1">＋ Tambah barang</Link>} />
       <Notice status={status} detail={detail} />
       <div className="metric-strip">
         <div className="metric-box"><span>Barang tersedia</span><strong>{available}</strong></div>
@@ -80,7 +89,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
       </div>
 
       <section className="branch-update-grid section-spacer">
-        {branches.map((branch) => {
+        {managedBranches.map((branch) => {
           const lastChange = lastChangeByBranch.get(branch.id);
           const changedToday = lastChange ? jakartaDayKey(lastChange) === today : false;
           const confirmedToday = confirmedTodayBranches.has(branch.id);
@@ -96,9 +105,9 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
         })}
       </section>
 
-      {showAdd && <StockForm branches={branches} action={addStockItem} title="Tambah barang" />}
-      {editItem && <StockForm branches={branches} action={updateStockItem} item={editItem} title={`Ubah barang · ${editItem.name}`} />}
-      {editId && !editItem && <div className="notice error">Barang yang akan diubah tidak ditemukan.</div>}
+      {showAdd && <StockForm branches={managedBranches} action={addStockItem} title="Tambah barang" />}
+      {editableItem && <StockForm branches={managedBranches} action={updateStockItem} item={editableItem} title={`Ubah barang · ${editableItem.name}`} />}
+      {editId && !editableItem && <div className="notice error">Barang tidak ditemukan atau dikelola oleh cabang lain.</div>}
 
       <div className="stock-workspace section-spacer">
         <section className="table-card">
@@ -108,17 +117,38 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
               <input className="search-input" name="q" defaultValue={query} placeholder="Cari nama barang..." aria-label="Cari stok" />
               <select name="category" defaultValue={category} aria-label="Filter kategori"><option value="">Semua kategori</option>{categories.map((itemCategory) => <option key={itemCategory}>{itemCategory}</option>)}</select>
               <select name="branch" defaultValue={branchId} aria-label="Filter cabang"><option value="">Semua cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+              <select name="itemStatus" defaultValue={itemStatus} aria-label="Filter status barang"><option value="">Semua status</option><option value="AVAILABLE">Tersedia</option><option value="SOLD">Terjual</option><option value="REMOVED">Diarsipkan</option></select>
               <button className="button secondary" type="submit">Filter</button>
             </form>
           </div>
           <div className="table-scroll"><table><thead><tr><th>BARANG</th><th>KATEGORI</th><th>UKURAN</th><th>CABANG</th><th>MASUK</th><th>STATUS</th><th>AKSI</th></tr></thead>
             <tbody>{items.map((item) => {
               const dead = item.status === "AVAILABLE" && item.enteredAt < deadStockDate;
+              const statusLabel = item.status === "REMOVED" ? "Diarsipkan" : item.status === "SOLD" ? "Terjual" : dead ? "Stok mati" : "Tersedia";
+              const statusTone = item.status === "AVAILABLE" && !dead ? "" : "neutral";
+              const canManageItem = staff.role === "OWNER" || item.branchId === staff.branchId;
+              const editParams = new URLSearchParams();
+              if (query) editParams.set("q", query);
+              if (category) editParams.set("category", category);
+              if (branchId) editParams.set("branch", branchId);
+              if (itemStatus) editParams.set("itemStatus", itemStatus);
+              editParams.set("tab", activeTab);
+              editParams.set("edit", item.id);
               return <tr key={item.id}>
                 <td><div className="stock-name"><span className="stock-thumb">♧</span><strong>{item.name}</strong></div></td><td>{item.category}</td><td><span className="tag">{item.size}</span></td><td>{item.branch.name}</td>
                 <td>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(item.enteredAt)}</td>
-                <td><span className={`status ${dead ? "warning" : item.status === "SOLD" ? "neutral" : ""}`}>{dead ? "Stok mati" : item.status === "SOLD" ? "Terjual" : "Tersedia"}</span></td>
-                <td>{item.status === "AVAILABLE" ? <div className="stock-actions"><Link className="inline-action" href={`/stok?edit=${encodeURIComponent(item.id)}&tab=${activeTab}`}>Ubah</Link><form action={markStockSold} className="inline-form"><input type="hidden" name="stockId" value={item.id} /><button className="inline-action" type="submit">Tandai terjual</button></form></div> : "—"}</td>
+                <td><span className={`status ${dead ? "warning" : statusTone}`}>{statusLabel}</span></td>
+                <td><div className="stock-actions">
+                  {canManageItem ? <>
+                    {item.status === "AVAILABLE" && <>
+                      <Link className="inline-action" href={`/stok?${editParams.toString()}`}>Ubah</Link>
+                      <form action={markStockSold} className="inline-form"><input type="hidden" name="stockId" value={item.id} /><ConfirmSubmitButton className="inline-action" confirmMessage={`Tandai ${item.name} sebagai terjual?`}>Tandai terjual</ConfirmSubmitButton></form>
+                      <form action={removeStockItem} className="inline-form"><input type="hidden" name="stockId" value={item.id} /><ConfirmSubmitButton className="inline-action danger" confirmMessage={`Keluarkan ${item.name} dari katalog aktif? Riwayatnya tetap tersimpan.`}>Arsipkan</ConfirmSubmitButton></form>
+                    </>}
+                    {item.status === "REMOVED" && <form action={restoreStockItem} className="inline-form"><input type="hidden" name="stockId" value={item.id} /><button className="inline-action" type="submit">Pulihkan</button></form>}
+                    {item.status === "SOLD" && "—"}
+                  </> : <span className="field-hint">Kelola di cabang {item.branch.name}</span>}
+                </div></td>
               </tr>;
             })}{!items.length && <tr><td className="table-empty" colSpan={7}>Belum ada stok yang cocok dengan filter ini.</td></tr>}</tbody>
           </table></div>
@@ -129,7 +159,24 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
           <nav className="tabs stock-tabs" aria-label="Aktivitas stok"><Link className={`tab${activeTab === "notifikasi" ? " active" : ""}`} href="/stok?tab=notifikasi">Notifikasi</Link><Link className={`tab${activeTab === "log" ? " active" : ""}`} href="/stok?tab=log">Log</Link></nav>
           <div className="activity-list">
             {activeTab === "notifikasi"
-              ? notifications.map(({ id, customer, stockItem, sentAt }) => <div className="activity-row" key={id}><span className="activity-dot" /><div className="activity-body"><strong>{customer.name}</strong><small>“Hai {customer.name.split(/\s+/)[0]}, barang wishlist kamu ada: {stockItem.name} ({stockItem.size}) di cabang {stockItem.branch.name}.”</small></div><span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", timeZone: "Asia/Jakarta" }).format(sentAt)}</span></div>)
+              ? notifications.map((notification) => {
+                const messageStatus = describeMessageStatus(notification.status);
+                  const body = notification.body || renderStockNotificationMessage(DEFAULT_STOCK_NOTIFICATION_MESSAGE, {
+                    customerName: notification.customer.name,
+                    stockName: notification.stockItem.name,
+                    size: notification.stockItem.size,
+                    branchName: notification.stockItem.branch.name,
+                  });
+                  return <div className="activity-row" key={notification.id}>
+                    <span className="activity-dot" />
+                    <div className="activity-body">
+                      <strong>{notification.customer.name}</strong>
+                      <small>{body}</small>
+                      <span className={`status ${messageStatus.isSimulated ? "" : "neutral"}`}>{messageStatus.label}</span>
+                    </div>
+                    <span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", timeZone: "Asia/Jakarta" }).format(notification.sentAt)}</span>
+                  </div>;
+                })
               : logs.map((log) => <div className="activity-row" key={log.id}><span className="activity-dot" /><div className="activity-body"><strong>{log.branch.name}</strong><small>{log.type === "CONFIRM" ? "Stok dikonfirmasi" : "Katalog stok diperbarui"}</small></div><span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.updatedAt)}</span></div>)}
             {activeTab === "notifikasi" && !notifications.length && <div className="empty-state">Belum ada notifikasi wishlist.</div>}
             {activeTab === "log" && !logs.length && <div className="empty-state">Belum ada log pembaruan.</div>}
@@ -147,15 +194,15 @@ function StockForm({ branches, action, item, title }: {
   title: string;
 }) {
   return (
-    <section className="form-card stock-form-card section-spacer">
+    <section className="form-card stock-form-card section-spacer" id="stock-form">
       <h2>{title}</h2><p>Lengkapi detail barang dan cabang penyimpanan.</p>
       <form action={action}>
         {item && <input type="hidden" name="stockId" value={item.id} />}
         <div className="form-grid">
           <div className="field"><label htmlFor="stock-name">Nama barang</label><input id="stock-name" name="name" required maxLength={100} defaultValue={item?.name} placeholder="Contoh: Kemeja linen vintage" /></div>
-          <div className="field"><label htmlFor="stock-category">Kategori</label><select id="stock-category" name="category" required defaultValue={item?.category ?? ""}><option value="" disabled>Pilih kategori</option>{["Atasan", "Bawahan", "Dress", "Outer", "Aksesori", "Sepatu", "Lainnya"].map((category) => <option key={category}>{category}</option>)}</select></div>
-          <div className="field"><label htmlFor="stock-size">Ukuran</label><select id="stock-size" name="size" required defaultValue={item?.size ?? ""}><option value="" disabled>Pilih ukuran</option>{["XS", "S", "M", "L", "XL", "XXL", "All size"].map((size) => <option key={size}>{size}</option>)}</select></div>
-          <div className="field"><label htmlFor="stock-branch">Cabang</label><select id="stock-branch" name="branchId" required defaultValue={item?.branchId ?? ""}><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>
+          <div className="field"><label htmlFor="stock-category">Kategori</label><select id="stock-category" name="category" required defaultValue={item?.category ?? ""}><option value="" disabled>Pilih kategori</option>{STOCK_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></div>
+          <div className="field"><label htmlFor="stock-size">Ukuran</label><select id="stock-size" name="size" required defaultValue={item?.size ?? ""}><option value="" disabled>Pilih ukuran</option>{STOCK_SIZES.map((size) => <option key={size}>{size}</option>)}</select></div>
+          <div className="field"><label htmlFor="stock-branch">Cabang</label><select id="stock-branch" name="branchId" required defaultValue={item?.branchId ?? (branches.length === 1 ? branches[0].id : "")}><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>
         </div>
         <div className="form-actions"><button className="button" type="submit">{item ? "Simpan perubahan" : "Simpan barang"}</button><Link className="button secondary" href="/stok">Batal</Link></div>
       </form>

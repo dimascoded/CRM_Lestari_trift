@@ -19,6 +19,7 @@ model Branch {
   stockItems      StockItem[]
   stockUpdateLogs StockUpdateLog[]
   duplicateChecks DuplicateCheckLog[]
+  auditLogs        AuditLog[]
   createdAt       DateTime            @default(now())
 }
 
@@ -26,11 +27,14 @@ model User {
   id           String        @id @default(cuid())
   name         String
   role         String
+  active       Boolean       @default(true)
   branchId     String?
   email        String?       @unique
   passwordHash String?
   branch       Branch?       @relation(fields: [branchId], references: [id])
   sessions     UserSession[]
+  transactionVoids TransactionVoid[]
+  auditLogs        AuditLog[]
   createdAt    DateTime      @default(now())
 }
 
@@ -38,6 +42,7 @@ model Customer {
   id                 String                   @id @default(cuid())
   name               String
   whatsapp           String                   @unique
+  active             Boolean                  @default(true)
   optedOut           Boolean                  @default(false)
   marketingConsent   Boolean                  @default(false)
   birthDate          DateTime?
@@ -73,6 +78,7 @@ model Transaction {
   redemption     Redemption? @relation(fields: [redemptionId], references: [id])
   createdAt      DateTime    @default(now())
   stamp          Stamp?
+  voidRecord     TransactionVoid?
 
   @@index([customerId, createdAt])
 }
@@ -86,10 +92,13 @@ model Stamp {
   branchId      String
   branch        Branch      @relation(fields: [branchId], references: [id])
   dayKey        String
+  activeDayKey  String?
   redeemedAt    DateTime?
+  voidedAt      DateTime?
   createdAt     DateTime    @default(now())
+  redemptions   RedemptionStamp[]
 
-  @@unique([customerId, dayKey])
+  @@unique([customerId, activeDayKey])
   @@index([customerId, redeemedAt])
 }
 
@@ -101,8 +110,51 @@ model Redemption {
   branch          Branch   @relation(fields: [branchId], references: [id])
   stampCount      Int      @default(3)
   discountPercent Int      @default(10)
+  voidedAt        DateTime?
   createdAt       DateTime @default(now())
   transaction     Transaction?
+  stamps          RedemptionStamp[]
+}
+
+model TransactionVoid {
+  id            String      @id @default(cuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  reason        String
+  voidedAt      DateTime    @default(now())
+
+  @@index([userId, voidedAt])
+}
+
+model RedemptionStamp {
+  id           String     @id @default(cuid())
+  redemptionId String
+  redemption   Redemption @relation(fields: [redemptionId], references: [id])
+  stampId      String
+  stamp        Stamp      @relation(fields: [stampId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  @@unique([redemptionId, stampId])
+  @@index([stampId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  branchId  String?
+  branch    Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  summary   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([branchId, createdAt])
 }
 
 model StockItem {
@@ -128,10 +180,18 @@ model StockMatchNotification {
   stockItem   StockItem @relation(fields: [stockItemId], references: [id])
   customerId  String
   customer    Customer  @relation(fields: [customerId], references: [id])
+  body        String    @default("")
+  status      String    @default("SIMULATED_SENT")
   sentAt      DateTime  @default(now())
 
   @@unique([stockItemId, customerId])
   @@index([customerId, sentAt])
+}
+
+model StockNotificationTemplate {
+  id        String   @id @default("wishlist")
+  message   String   @default("Hai {nama}, barang wishlist kamu ada: {barang} ({ukuran}) di cabang {cabang}.")
+  updatedAt DateTime @updatedAt
 }
 
 model DuplicateCheckLog {
@@ -189,7 +249,7 @@ model ReminderLog {
   template     ReminderTemplate @relation(fields: [templateId], references: [id])
   body         String           @default("")
   scheduledFor DateTime?
-  status       String           @default("SENT")
+  status       String           @default("SIMULATED_SENT")
   sentAt       DateTime         @default(now())
 
   @@index([customerId, sentAt])
@@ -213,6 +273,17 @@ model UserSession {
   createdAt DateTime @default(now())
 
   @@index([userId, expiresAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  emailHash String
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([emailHash, createdAt])
+  @@index([ipHash, createdAt])
+  @@index([createdAt])
 }
 
 model CustomerSession {

@@ -1,9 +1,20 @@
 import Link from "next/link";
-import { registerCustomer, recordTransaction } from "@/app/actions";
+import { registerCustomer, recordTransaction, voidTransaction } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
-import { MESSAGE_CONSENT_TEXT, normalizeWhatsApp, REDEMPTION_DISCOUNT_PERCENT, STAMP_MINIMUM_TRANSACTION, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
+import {
+  currentTime,
+  jakartaDayKey,
+  MESSAGE_CONSENT_TEXT,
+  normalizeWhatsApp,
+  REDEMPTION_DISCOUNT_PERCENT,
+  STAMP_MINIMUM_TRANSACTION,
+  STAMPS_PER_REDEMPTION,
+  TRANSACTION_VOID_REASON_MAX_LENGTH,
+  rupiah,
+} from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -13,7 +24,7 @@ export default function KasirPage({ searchParams }: { searchParams: SearchParams
 }
 
 async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
-  await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
+  const staff = await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const customerId = typeof params.customer === "string" ? params.customer : "";
@@ -21,11 +32,14 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
   const status = typeof params.status === "string" ? params.status : undefined;
   const discount = typeof params.discount === "string" ? params.discount : undefined;
   const amount = typeof params.amount === "string" ? params.amount : undefined;
+  const todayKey = jakartaDayKey(currentTime());
+  const canVoid = staff.role === "OWNER" || staff.role === "MANAGER";
   const branches = await db.branch.findMany({ orderBy: { name: "asc" } });
   const [customers, selected] = await Promise.all([
     query
       ? db.customer.findMany({
           where: {
+            active: true,
             OR: [
               { name: { contains: query } },
               { whatsapp: { contains: query } },
@@ -41,11 +55,15 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
       : Promise.resolve([]),
     customerId
       ? db.customer.findUnique({
-          where: { id: customerId },
+          where: { id: customerId, active: true },
           include: {
             registeredAt: true,
-            stamps: { where: { redeemedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
-            transactions: { orderBy: { createdAt: "desc" }, take: 3, include: { branch: true } },
+            stamps: { where: { redeemedAt: null, voidedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+            transactions: {
+              orderBy: { createdAt: "desc" },
+              take: 3,
+              include: { branch: true, voidRecord: { select: { voidedAt: true } } },
+            },
           },
         })
       : Promise.resolve(null),
@@ -109,9 +127,34 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
                 <div className="cashier-history">
                   <strong>Tiga transaksi terakhir</strong>
                   {selected.transactions.map((transaction) => (
-                    <div className="activity-row" key={transaction.id}>
-                      <div className="activity-body"><strong>{transaction.branch.name}</strong><small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(transaction.createdAt)}</small></div>
-                      <span className="activity-amount">{rupiah(transaction.amount - transaction.discountAmount)}</span>
+                    <div className="cashier-transaction" key={transaction.id}>
+                      <div className="activity-row">
+                        <div className="activity-body">
+                          <strong>{transaction.branch.name}</strong>
+                          <small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(transaction.createdAt)}{transaction.voidRecord ? " · Dibatalkan" : ""}</small>
+                        </div>
+                        {transaction.voidRecord
+                          ? <span className="status neutral">Dibatalkan</span>
+                          : <span className="activity-amount">{rupiah(transaction.amount - transaction.discountAmount)}</span>}
+                      </div>
+                      {canVoid &&
+                        (staff.role === "OWNER" || staff.branchId === transaction.branchId) &&
+                        !transaction.voidRecord &&
+                        jakartaDayKey(transaction.createdAt) === todayKey && (
+                          <form action={voidTransaction} className="transaction-void-form">
+                            <input type="hidden" name="transactionId" value={transaction.id} />
+                            <label className="field">
+                              Alasan pembatalan
+                              <input name="reason" required maxLength={TRANSACTION_VOID_REASON_MAX_LENGTH} placeholder="Contoh: nominal salah input" />
+                            </label>
+                            <ConfirmSubmitButton
+                              className="inline-action danger"
+                              confirmMessage="Batalkan transaksi ini? Riwayat tidak dihapus, tetapi stamp hasil transaksi akan dibatalkan."
+                            >
+                              Batalkan
+                            </ConfirmSubmitButton>
+                          </form>
+                        )}
                     </div>
                   ))}
                   {!selected.transactions.length && <div className="empty-state">Belum ada transaksi.</div>}

@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { setCustomerActive, updateCustomerRecord } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
@@ -5,18 +8,24 @@ import { normalizeWhatsApp } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+const pageSize = 25;
 
 export default function CustomersPage({ searchParams }: { searchParams: SearchParams }) {
   return <CustomersContent searchParams={searchParams} />;
 }
 
 async function CustomersContent({ searchParams }: { searchParams: SearchParams }) {
-  await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
+  const staff = await requireStaffPage(["OWNER", "MANAGER", "CASHIER"]);
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
+  const archived = params.archived === "1";
   const status = typeof params.status === "string" ? params.status : undefined;
-  const customers = await db.customer.findMany({
-    where: query
+  const editId = typeof params.edit === "string" ? params.edit : "";
+  const requestedPage = Number(params.page);
+  const safePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const where = {
+    active: !archived,
+    ...(query
       ? {
           OR: [
             { name: { contains: query } },
@@ -24,37 +33,118 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
             ...(query.replace(/\D/g, "").length >= 7 ? [{ whatsapp: { equals: normalizeWhatsApp(query) } }] : []),
           ],
         }
-      : undefined,
-    orderBy: { createdAt: "desc" },
-    take: 100,
-    include: {
-      registeredAt: true,
-      stamps: { where: { redeemedAt: null }, select: { id: true } },
-      _count: { select: { transactions: true, wishlists: true } },
-    },
-  });
+      : {}),
+  };
+  const totalCount = await db.customer.count({ where });
+  const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
+  const page = Math.min(safePage, pageCount);
+  const [customers, candidateEdit] = await Promise.all([
+    db.customer.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: pageSize,
+      skip: (page - 1) * pageSize,
+      include: {
+        registeredAt: true,
+        stamps: { where: { redeemedAt: null, voidedAt: null }, select: { id: true } },
+        _count: { select: { transactions: true, wishlists: true } },
+      },
+    }),
+    staff.role !== "CASHIER" && editId
+      ? db.customer.findUnique({ where: { id: editId }, include: { registeredAt: true } })
+      : Promise.resolve(null),
+  ]);
+  const canManage = staff.role === "OWNER" || staff.role === "MANAGER";
+  const editCustomer = candidateEdit && (staff.role === "OWNER" || candidateEdit.registeredAtId === staff.branchId)
+    ? candidateEdit
+    : null;
+  const queryParams = new URLSearchParams();
+  if (query) queryParams.set("q", query);
+  queryParams.set("archived", archived ? "1" : "0");
+  const listUrl = `/pelanggan?${queryParams.toString()}`;
+  const pageUrl = (pageNumber: number) => {
+    const nextParams = new URLSearchParams(queryParams);
+    if (pageNumber > 1) nextParams.set("page", String(pageNumber));
+    return `/pelanggan?${nextParams.toString()}`;
+  };
+  const archiveUrl = new URLSearchParams();
+  if (query) archiveUrl.set("q", query);
+  archiveUrl.set("archived", archived ? "0" : "1");
+
   return (
     <div className="page-content">
-      <PageHeader eyebrow="OPERASIONAL · PELANGGAN" title="Database pelanggan" description="Profil terpusat dan aktivitas pelanggan lintas cabang." />
+      <PageHeader eyebrow="OPERASIONAL · PELANGGAN" title="Database pelanggan" description="Cari, perbarui, dan arsipkan profil tanpa menghapus riwayat transaksi atau persetujuan." />
       <Notice status={status} />
-      <section className="table-card">
-        <div className="table-titlebar">
-          <div><h2>Daftar pelanggan</h2><p>{customers.length} pelanggan ditampilkan{query ? ` untuk “${query}”` : ""}.</p></div>
-          <form className="search-form" method="get">
-            <input className="search-input" type="search" name="q" defaultValue={query} placeholder="Cari nama atau WhatsApp..." aria-label="Cari pelanggan" />
-            <button className="button secondary" type="submit">Cari</button>
+      {editId && !editCustomer && <Notice status={candidateEdit ? "customer-forbidden" : "customer-not-found"} />}
+      {editCustomer && (
+        <section className="form-card section-spacer">
+          <h2>Ubah profil pelanggan</h2>
+          <p>Riwayat transaksi, stamp, dan persetujuan pesan tidak berubah.</p>
+          <form action={updateCustomerRecord}>
+            <input type="hidden" name="customerId" value={editCustomer.id} />
+            <div className="form-grid">
+              <div className="field"><label htmlFor="edit-customer-name">Nama pelanggan</label><input id="edit-customer-name" name="name" required maxLength={100} defaultValue={editCustomer.name} autoComplete="name" /></div>
+              <div className="field"><label htmlFor="edit-customer-whatsapp">Nomor WhatsApp</label><input id="edit-customer-whatsapp" name="whatsapp" type="tel" inputMode="tel" autoComplete="tel" required maxLength={18} defaultValue={editCustomer.whatsapp} /></div>
+            </div>
+            <p className="field-hint">Terdaftar di {editCustomer.registeredAt.name}. Perubahan nomor harus dikonfirmasi pelanggan.</p>
+            <div className="form-actions">
+              <button className="button" type="submit">Simpan perubahan</button>
+              <Link className="button secondary" href={listUrl}>Batal</Link>
+            </div>
           </form>
+        </section>
+      )}
+      <section className="table-card section-spacer">
+        <div className="table-titlebar">
+          <div><h2>{archived ? "Pelanggan diarsipkan" : "Pelanggan aktif"}</h2><p>{totalCount} pelanggan{query ? ` cocok dengan “${query}”` : ""}.</p></div>
+          <div className="customer-tools">
+            <form className="search-form" method="get">
+              <input type="hidden" name="archived" value={archived ? "1" : "0"} />
+              <input className="search-input" type="search" name="q" defaultValue={query} placeholder="Cari nama atau WhatsApp..." aria-label="Cari pelanggan" />
+              <button className="button secondary" type="submit">Cari</button>
+            </form>
+            <Link className="button secondary" href={`/pelanggan?${archiveUrl.toString()}`}>{archived ? "Lihat pelanggan aktif" : "Lihat arsip"}</Link>
+          </div>
         </div>
-        <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>DAFTAR DI</th><th>STAMP AKTIF</th><th>TRANSAKSI</th><th>WISHLIST</th><th>PESAN</th></tr></thead>
-          <tbody>{customers.map((customer) => (
-            <tr key={customer.id}>
-              <td><div className="customer-cell"><span className="customer-initial">{customer.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{customer.name}</strong><small>{customer.whatsapp}</small></span></div></td>
-              <td>{customer.registeredAt.name}</td><td><span className="tag">{customer.stamps.length} stamp</span></td>
-              <td>{customer._count.transactions}</td><td>{customer._count.wishlists}</td>
-              <td><span className={`status ${customer.marketingConsent && !customer.optedOut ? "" : "neutral"}`}>{customer.marketingConsent && !customer.optedOut ? "Setuju" : customer.optedOut ? "Berhenti" : "Belum setuju"}</span></td>
-            </tr>
-          ))}{!customers.length && <tr><td className="table-empty" colSpan={6}>Tidak ada pelanggan yang cocok dengan pencarian.</td></tr>}</tbody>
+        <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>DAFTAR DI</th><th>STAMP AKTIF</th><th>TRANSAKSI</th><th>WISHLIST</th><th>PESAN</th><th>STATUS</th>{canManage && <th>AKSI</th>}</tr></thead>
+          <tbody>{customers.map((customer) => {
+            const actionParams = new URLSearchParams(queryParams);
+            actionParams.set("edit", customer.id);
+            return (
+              <tr key={customer.id}>
+                <td><div className="customer-cell"><span className="customer-initial">{customer.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{customer.name}</strong><small>{customer.whatsapp}</small></span></div></td>
+                <td>{customer.registeredAt.name}</td>
+                <td><span className="tag">{customer.stamps.length} stamp</span></td>
+                <td>{customer._count.transactions}</td>
+                <td>{customer._count.wishlists}</td>
+                <td><span className={`status ${customer.marketingConsent && !customer.optedOut ? "" : "neutral"}`}>{customer.marketingConsent && !customer.optedOut ? "Setuju" : customer.optedOut ? "Berhenti" : "Belum setuju"}</span></td>
+                <td><span className={`status ${customer.active ? "" : "neutral"}`}>{customer.active ? "Aktif" : "Diarsipkan"}</span></td>
+                {canManage && <td>{staff.role === "OWNER" || customer.registeredAtId === staff.branchId
+                  ? <div className="customer-row-actions">
+                      <Link className="inline-action" href={`/pelanggan?${actionParams.toString()}`}>Ubah</Link>
+                      <form action={setCustomerActive}>
+                        <input type="hidden" name="customerId" value={customer.id} />
+                        <input type="hidden" name="active" value={String(!customer.active)} />
+                        {customer.active
+                          ? <ConfirmSubmitButton className="inline-action danger" confirmMessage={`Arsipkan ${customer.name}? Riwayat dan stamp tetap disimpan.`}>Arsipkan</ConfirmSubmitButton>
+                          : <button className="inline-action" type="submit">Pulihkan</button>}
+                      </form>
+                    </div>
+                  : <span className="field-hint">Kelola di cabang asal</span>}
+                </td>}
+              </tr>
+            );
+          })}
+            {!customers.length && <tr><td className="table-empty" colSpan={canManage ? 8 : 7}>{query ? "Tidak ada pelanggan yang cocok. Periksa nama atau nomor, atau ubah filter arsip." : archived ? "Belum ada pelanggan di arsip." : "Belum ada pelanggan aktif."}</td></tr>}
+          </tbody>
         </table></div>
+        {pageCount > 1 && <nav className="table-pagination" aria-label="Halaman daftar pelanggan">
+          <span>Halaman {page} dari {pageCount}</span>
+          <div>
+            {page > 1 && <Link className="button small secondary" href={pageUrl(page - 1)}>Sebelumnya</Link>}
+            {page < pageCount && <Link className="button small secondary" href={pageUrl(page + 1)}>Berikutnya</Link>}
+          </div>
+        </nav>}
       </section>
     </div>
   );

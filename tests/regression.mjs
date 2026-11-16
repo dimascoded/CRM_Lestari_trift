@@ -21,10 +21,12 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { registerCustomerRecord, setCustomerMarketingConsent }, { recordTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
   import("../src/lib/password.ts"),
+  import("../src/lib/staff-auth-service.ts"),
+  import("../src/lib/message-status.ts"),
   import("../src/lib/customer-service.ts"),
   import("../src/lib/transaction-service.ts"),
   import("../src/lib/wishlist-match.ts"),
@@ -65,6 +67,99 @@ test("staff passwords and customer login codes are not stored as plaintext", asy
   assert.equal(await verifyCustomerLoginCode(code, codeHash), true);
   assert.equal(await verifyCustomerLoginCode("000000", codeHash), false);
 });
+
+test("message status is unified and always labeled as simulation", async () => {
+  assert.deepEqual(describeMessageStatus(SIMULATED_SENT_STATUS), {
+    isSimulated: true,
+    label: "Terkirim (simulasi)",
+  });
+  assert.deepEqual(describeMessageStatus("SENT"), {
+    isSimulated: false,
+    label: "Status tidak dikenal (simulasi): SENT",
+  });
+});
+
+test("user provisioning refuses non-interactive execution without creating an account", async () => {
+  const before = await db.user.count();
+  const result = spawnSync(process.execPath, [
+    "--disable-warning=ExperimentalWarning",
+    "--experimental-strip-types",
+    "--experimental-loader",
+    "./tests/ts-loader.mjs",
+    "scripts/create-user.mjs",
+  ], {
+    cwd: root,
+    env,
+    input: "",
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /interactive terminal/);
+  assert.equal(await db.user.count(), before);
+});
+
+test("staff login blocks attempts by email and IP, then allows login after the window", async () => {
+  const firstPassword = "staff-login-first-test";
+  const secondPassword = "staff-login-second-test";
+  const [first, second] = await Promise.all([
+    db.user.create({
+      data: {
+        name: "Uji Login Pertama",
+        email: "login-first@example.test",
+        role: "CASHIER",
+        branchId: branches[0].id,
+        passwordHash: await hashPassword(firstPassword),
+      },
+    }),
+    db.user.create({
+      data: {
+        name: "Uji Login Kedua",
+        email: "login-second@example.test",
+        role: "CASHIER",
+        branchId: branches[0].id,
+        passwordHash: await hashPassword(secondPassword),
+      },
+    }),
+  ]);
+  const sharedIp = "198.51.100.27";
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    assert.equal(
+      await authenticateStaffRecord({ email: first.email, password: "wrong-password", clientIp: sharedIp }),
+      null,
+    );
+  }
+  assert.equal(await db.loginAttempt.count(), 5);
+  assert.equal(
+    await authenticateStaffRecord({ email: first.email, password: firstPassword, clientIp: sharedIp }),
+    null,
+  );
+  assert.equal(
+    await authenticateStaffRecord({ email: first.email, password: firstPassword, clientIp: "198.51.100.28" }),
+    null,
+  );
+  assert.equal(
+    await authenticateStaffRecord({ email: second.email, password: secondPassword, clientIp: sharedIp }),
+    null,
+  );
+
+  await db.loginAttempt.updateMany({
+    data: { createdAt: new Date(Date.now() - 16 * 60_000) },
+  });
+  const authenticated = await authenticateStaffRecord({
+    email: first.email,
+    password: firstPassword,
+    clientIp: "198.51.100.28",
+  });
+  assert.equal(authenticated?.id, first.id);
+  assert.equal(await db.loginAttempt.count(), 0);
+  assert.equal(
+    (await authenticateStaffRecord({ email: second.email, password: secondPassword, clientIp: sharedIp }))?.id,
+    second.id,
+  );
+});
+
 await db.kpiTarget.createMany({
   data: targets.map(([code, label, unit, baseline, target]) => ({ code, label, unit, baseline, target })),
 });
@@ -88,7 +183,14 @@ async function addHistory(customerId, count, ages, branchId = branches[0].id) {
     const createdAt = new Date(Date.now() - age * 86400000);
     const transaction = await db.transaction.create({ data: { customerId, branchId, amount: 150000, createdAt } });
     await db.stamp.create({
-      data: { customerId, transactionId: transaction.id, branchId, dayKey: jakartaDayKey(createdAt), createdAt },
+      data: {
+        customerId,
+        transactionId: transaction.id,
+        branchId,
+        dayKey: jakartaDayKey(createdAt),
+        activeDayKey: jakartaDayKey(createdAt),
+        createdAt,
+      },
     });
   }
 }
@@ -99,6 +201,37 @@ test("duplicate registration is rejected and logged", async () => {
   assert.equal(duplicate.duplicate, true);
   assert.equal(await db.customer.count({ where: { whatsapp: first.whatsapp } }), 1);
   assert.equal(await db.duplicateCheckLog.count({ where: { existingCustomerId: first.id } }), 1);
+});
+
+test("archived customers keep history but cannot transact or receive simulated messages", async () => {
+  const buyer = await customer("Pelanggan Diarsipkan");
+  await addHistory(buyer.id, 3, [24, 16, 8]);
+  const item = await db.stockItem.create({
+    data: { name: "Kemeja Arsip", category: "Atasan", size: "M", branchId: branches[0].id },
+  });
+  const wishlist = await db.wishlist.create({
+    data: { customerId: buyer.id, category: "Atasan", size: "M" },
+  });
+  const template = await db.reminderTemplate.create({
+    data: { name: "Reminder Arsip", segment: "PERSONAL", message: "Hai {nama}." },
+  });
+  await db.customer.update({ where: { id: buyer.id }, data: { active: false } });
+
+  const transaction = await recordTransactionRecord({
+    customerId: buyer.id,
+    branchId: branches[0].id,
+    amount: 150000,
+    useStampDiscount: false,
+  });
+  assert.equal(transaction, null);
+  assert.equal(await db.$transaction((tx) => matchWishlist(tx, wishlist)), 0);
+  assert.equal(await db.$transaction((tx) => matchStockItem(tx, item)), 0);
+  await processDueReminders(template.id);
+
+  assert.equal(await db.transaction.count({ where: { customerId: buyer.id } }), 3);
+  assert.equal(await db.stamp.count({ where: { customerId: buyer.id } }), 3);
+  assert.equal(await db.reminderLog.count({ where: { customerId: buyer.id } }), 0);
+  assert.equal(await db.stockMatchNotification.count({ where: { customerId: buyer.id } }), 0);
 });
 
 test("customer messaging consent is explicitly recorded at registration", async () => {
@@ -117,6 +250,27 @@ test("customer messaging consent is explicitly recorded at registration", async 
   assert.equal(consentLog?.policyVersion, MESSAGE_CONSENT_POLICY_VERSION);
   assert.ok(consentLog?.consentText);
   assert.equal(declineLog?.status, "DECLINED");
+});
+
+test("customer creation and consent changes create minimal audit entries", async () => {
+  const actor = await db.user.create({
+    data: { name: "Owner Audit Uji", email: "owner-audit@example.test", role: "OWNER" },
+  });
+  const phone = "+628123459003";
+  const result = await registerCustomerRecord("Nama Rahasia Uji Audit", phone, branches[0].id, true, actor.id);
+  assert.equal(result.duplicate, false);
+  const customerId = result.customer.id;
+  const creationLogs = await db.auditLog.findMany({ where: { entityId: customerId, action: "CUSTOMER_CREATED" } });
+  assert.equal(creationLogs.length, 1);
+  assert.equal(creationLogs[0].userId, actor.id);
+  assert.equal(creationLogs[0].summary.includes(phone), false);
+  assert.equal(creationLogs[0].summary.includes("Nama Rahasia Uji Audit"), false);
+  assert.equal(await db.auditLog.count({ where: { entityId: customerId, action: "CUSTOMER_CONSENT_GRANTED" } }), 1);
+
+  await db.$transaction((tx) => setCustomerMarketingConsent(tx, customerId, false, "CUSTOMER_PORTAL"));
+  const consentLogs = await db.auditLog.findMany({ where: { entityId: customerId, action: "CUSTOMER_CONSENT_REVOKED" } });
+  assert.equal(consentLogs.length, 1);
+  assert.equal(consentLogs[0].userId, null);
 });
 
 test("revoked message consent is audited and disables future messaging", async () => {
@@ -187,14 +341,193 @@ test("unchecked stamp discount leaves stamps intact", async () => {
   assert.equal(await db.stamp.count({ where: { customerId: buyer.id, redeemedAt: null } }), 4);
 });
 
+test("voiding a redeemed transaction preserves history, restores stamps, and permits a corrected same-day stamp", async () => {
+  const owner = await db.user.create({
+    data: { name: "Owner Void Uji", email: "owner-void@example.test", role: "OWNER" },
+  });
+  const buyer = await customer("Uji Void Penukaran");
+  await addHistory(buyer.id, 3, [4, 3, 2]);
+  const outcome = await recordTransactionRecord({
+    customerId: buyer.id,
+    branchId: branches[0].id,
+    amount: STAMP_MINIMUM_TRANSACTION,
+    useStampDiscount: true,
+  });
+  assert.equal(outcome?.result, "stamp-added");
+  const transaction = await db.transaction.findFirst({
+    where: { customerId: buyer.id, createdAt: { gte: new Date(Date.now() - 10_000) } },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.ok(transaction?.redemptionId);
+  const links = await db.redemptionStamp.findMany({
+    where: { redemptionId: transaction.redemptionId },
+    select: { stampId: true },
+  });
+  assert.equal(links.length, 3);
+
+  assert.equal(
+    await voidTransactionRecord({
+      transactionId: transaction.id,
+      userId: owner.id,
+      reason: "Nominal salah input",
+    }),
+    "voided",
+  );
+  const preserved = await db.transaction.findUnique({
+    where: { id: transaction.id },
+    include: { voidRecord: true, redemption: true },
+  });
+  assert.equal(preserved?.amount, STAMP_MINIMUM_TRANSACTION);
+  assert.equal(preserved?.voidRecord?.reason, "Nominal salah input");
+  assert.ok(preserved?.voidRecord?.voidedAt);
+  assert.ok(preserved?.redemption?.voidedAt);
+  const restored = await db.stamp.findMany({ where: { id: { in: links.map(({ stampId }) => stampId) } } });
+  assert.ok(restored.every(({ redeemedAt, voidedAt }) => redeemedAt === null && voidedAt === null));
+  const cancelledStamp = await db.stamp.findUnique({ where: { transactionId: transaction.id } });
+  assert.ok(cancelledStamp?.voidedAt);
+  assert.equal(cancelledStamp?.activeDayKey, null);
+  assert.equal(await db.transaction.count({ where: { id: transaction.id } }), 1);
+  assert.equal(await db.redemptionStamp.count({ where: { redemptionId: transaction.redemptionId } }), 3);
+  assert.equal(await db.auditLog.count({ where: { entityId: transaction.id, action: "TRANSACTION_VOIDED" } }), 1);
+
+  const corrected = await recordTransactionRecord({
+    customerId: buyer.id,
+    branchId: branches[1].id,
+    amount: STAMP_MINIMUM_TRANSACTION,
+    useStampDiscount: false,
+  });
+  assert.equal(corrected?.result, "stamp-added");
+
+  const start30 = new Date(Date.now() - 30 * 86400000);
+  const [activeTransactions, activeCustomers] = await Promise.all([
+    db.transaction.count({ where: { createdAt: { gte: start30 }, voidRecord: null } }),
+    db.transaction.groupBy({
+      by: ["customerId"],
+      where: { createdAt: { gte: start30 }, voidRecord: null },
+    }),
+  ]);
+  const frequency = (await getKpis()).find(({ code }) => code === "S7a");
+  assert.equal(frequency?.value, activeCustomers.length ? activeTransactions / activeCustomers.length : 0);
+});
+
+test("void rejects a stamp already redeemed and a transaction outside the same Jakarta day", async () => {
+  const owner = await db.user.create({
+    data: { name: "Owner Void Batas", email: "owner-void-window@example.test", role: "OWNER" },
+  });
+  const redeemedBuyer = await customer("Uji Stamp Terpakai");
+  await addHistory(redeemedBuyer.id, 3, [0, 5, 4]);
+  const earnedToday = await db.stamp.findUnique({
+    where: { customerId_activeDayKey: { customerId: redeemedBuyer.id, activeDayKey: jakartaDayKey() } },
+  });
+  assert.ok(earnedToday);
+  await recordTransactionRecord({
+    customerId: redeemedBuyer.id,
+    branchId: branches[0].id,
+    amount: STAMP_MINIMUM_TRANSACTION,
+    useStampDiscount: true,
+  });
+  assert.equal(
+    await voidTransactionRecord({
+      transactionId: earnedToday.transactionId,
+      userId: owner.id,
+      reason: "Uji stamp sudah ditukar",
+    }),
+    "stamp-already-redeemed",
+  );
+  assert.equal(await db.transactionVoid.count({ where: { transactionId: earnedToday.transactionId } }), 0);
+
+  const expiredBuyer = await customer("Uji Batas Hari Void");
+  const yesterday = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const expired = await db.transaction.create({
+    data: { customerId: expiredBuyer.id, branchId: branches[0].id, amount: 150000, createdAt: yesterday },
+  });
+  assert.equal(
+    await voidTransactionRecord({
+      transactionId: expired.id,
+      userId: owner.id,
+      reason: "Koreksi terlambat",
+    }),
+    "outside-window",
+  );
+  assert.equal(await db.transactionVoid.count({ where: { transactionId: expired.id } }), 0);
+});
+
+test("void refuses a redemption whose stamp history cannot be verified", async () => {
+  const owner = await db.user.create({
+    data: { name: "Owner Riwayat Void", email: "owner-void-history@example.test", role: "OWNER" },
+  });
+  const buyer = await customer("Uji Riwayat Penukaran Tidak Lengkap");
+  const now = new Date();
+  const redemption = await db.redemption.create({
+    data: { customerId: buyer.id, branchId: branches[0].id, createdAt: now },
+  });
+  const transaction = await db.transaction.create({
+    data: {
+      customerId: buyer.id,
+      branchId: branches[0].id,
+      amount: STAMP_MINIMUM_TRANSACTION,
+      redemptionId: redemption.id,
+      createdAt: now,
+    },
+  });
+  assert.equal(
+    await voidTransactionRecord({
+      transactionId: transaction.id,
+      userId: owner.id,
+      reason: "Riwayat penukaran tidak lengkap",
+    }),
+    "redemption-history-incomplete",
+  );
+  assert.equal(await db.transactionVoid.count({ where: { transactionId: transaction.id } }), 0);
+});
+
+test("voided transactions do not count toward personal reminder history", async () => {
+  const owner = await db.user.create({
+    data: { name: "Owner Void Reminder", email: "owner-void-reminder@example.test", role: "OWNER" },
+  });
+  const buyer = await customer("Uji Reminder Setelah Void");
+  const referenceDate = new Date(Date.now() + 365 * 86400000);
+  const dates = [16, 8, 0].map((age) => new Date(referenceDate.getTime() - age * 86400000));
+  const transactions = await Promise.all(
+    dates.map((createdAt) =>
+      db.transaction.create({
+        data: { customerId: buyer.id, branchId: branches[0].id, amount: 150000, createdAt },
+      }),
+    ),
+  );
+  const todayTransaction = transactions[2];
+  assert.equal(
+    await voidTransactionRecord({
+      transactionId: todayTransaction.id,
+      userId: owner.id,
+      reason: "Transaksi uji dibatalkan",
+      now: referenceDate,
+    }),
+    "voided",
+  );
+  const template = await db.reminderTemplate.create({
+    data: { name: "Reminder personal setelah void", segment: "PERSONAL", message: "Hai {nama}." },
+  });
+  const reminderDate = new Date(referenceDate.getTime() + 6 * 86400000);
+  await processDueReminders(template.id, reminderDate);
+  assert.equal(await db.reminderLog.count({ where: { customerId: buyer.id, templateId: template.id } }), 0);
+});
+
 test("wishlist created after matching stock creates one notification, including after edits", async () => {
+  await db.stockNotificationTemplate.create({
+    data: { id: "wishlist", message: "Hai {nama}, {barang} ukuran {ukuran} di {cabang}." },
+  });
   const buyer = await customer("Uji Wishlist");
   const item = await db.stockItem.create({ data: { name: "Kemeja Linen", category: "Atasan", size: "M", branchId: branches[0].id } });
   await db.$transaction(async (tx) => {
     const wishlist = await tx.wishlist.create({ data: { customerId: buyer.id, category: "Atasan", size: "M", keyword: "linen" } });
     await matchWishlist(tx, wishlist);
   });
-  assert.equal(await db.stockMatchNotification.count({ where: { customerId: buyer.id, stockItemId: item.id } }), 1);
+  const originalNotification = await db.stockMatchNotification.findUnique({
+    where: { stockItemId_customerId: { stockItemId: item.id, customerId: buyer.id } },
+  });
+  assert.equal(originalNotification?.body, "Hai Uji, Kemeja Linen ukuran M di Yogyakarta.");
+  assert.equal(originalNotification?.status, "SIMULATED_SENT");
   await db.$transaction(async (tx) => {
     const edited = await tx.stockItem.update({ where: { id: item.id }, data: { category: "Dress", size: "S" } });
     await matchStockItem(tx, edited);
@@ -202,6 +535,23 @@ test("wishlist created after matching stock creates one notification, including 
     await matchStockItem(tx, restored);
   });
   assert.equal(await db.stockMatchNotification.count({ where: { customerId: buyer.id, stockItemId: item.id } }), 1);
+
+  await db.stockNotificationTemplate.update({
+    where: { id: "wishlist" },
+    data: { message: "{nama}, update: {barang} {ukuran} @ {cabang}." },
+  });
+  const nextBuyer = await customer("Budi Baru");
+  const nextItem = await db.stockItem.create({ data: { name: "Rok Plisket", category: "Bawahan", size: "L", branchId: branches[0].id } });
+  const nextWishlist = await db.wishlist.create({ data: { customerId: nextBuyer.id, category: "Bawahan", size: "L" } });
+  await db.$transaction((tx) => matchWishlist(tx, nextWishlist));
+  const nextNotification = await db.stockMatchNotification.findUnique({
+    where: { stockItemId_customerId: { stockItemId: nextItem.id, customerId: nextBuyer.id } },
+  });
+  const preservedNotification = await db.stockMatchNotification.findUnique({
+    where: { stockItemId_customerId: { stockItemId: item.id, customerId: buyer.id } },
+  });
+  assert.equal(nextNotification?.body, "Budi, update: Rok Plisket L @ Yogyakarta.");
+  assert.equal(preservedNotification?.body, "Hai Uji, Kemeja Linen ukuran M di Yogyakarta.");
 });
 
 test("wishlist notifications require consent and share the seven-day messaging cooldown", async () => {
@@ -266,6 +616,7 @@ test("scheduled reminders require consent and share cooldown with stock notifica
   assert.ok(sent >= 1);
   const sentLog = await db.reminderLog.findFirst({ where: { customerId: eligible.id, templateId: template.id } });
   assert.equal(sentLog?.body, "Hai Ayu, kabar baru.");
+  assert.equal(sentLog?.status, SIMULATED_SENT_STATUS);
   assert.equal(await db.reminderLog.count({ where: { customerId: optedOut.id, templateId: template.id } }), 0);
   assert.equal(await db.reminderLog.count({ where: { customerId: noConsent.id, templateId: template.id } }), 0);
   assert.equal(await db.reminderLog.count({ where: { customerId: recent.id, templateId: template.id } }), 0);

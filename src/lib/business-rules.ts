@@ -1,6 +1,8 @@
 export const STAMP_MINIMUM_TRANSACTION = 150_000;
 export const STAMPS_PER_REDEMPTION = 3;
 export const REDEMPTION_DISCOUNT_PERCENT = 10;
+export const STOCK_CATEGORIES = ["Atasan", "Bawahan", "Dress", "Outer", "Aksesori", "Sepatu", "Lainnya"] as const;
+export const STOCK_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "All size"] as const;
 export const DEAD_STOCK_DAYS = 60;
 export const REMINDER_COOLDOWN_DAYS = 7;
 export const REMINDER_LEAD_DAYS = 2;
@@ -8,8 +10,14 @@ export const REMINDER_GRACE_DAYS = 3;
 export const REMINDER_HISTORY_SIZE = 5;
 export const ON_TIME_MINUTES = 60;
 export const MESSAGE_CONSENT_POLICY_VERSION = "2026-11-v1";
+export const STAFF_LOGIN_MAX_ATTEMPTS = 5;
+export const STAFF_LOGIN_WINDOW_MINUTES = 15;
+export const TRANSACTION_VOID_WINDOW = "SAME_JAKARTA_DAY";
+export const TRANSACTION_VOID_REASON_MAX_LENGTH = 500;
 export const MESSAGE_CONSENT_TEXT =
   "Saya setuju menerima pesan WhatsApp dari Lestari Thrift berupa reminder belanja dan pemberitahuan stok wishlist, maksimal 1 pesan dalam 7 hari. Saya dapat menarik persetujuan kapan saja.";
+export const DEFAULT_STOCK_NOTIFICATION_MESSAGE =
+  "Hai {nama}, barang wishlist kamu ada: {barang} ({ukuran}) di cabang {cabang}.";
 
 export function normalizeWhatsApp(value: string) {
   const input = value.trim();

@@ -44,6 +44,16 @@ Tahap 1–5 tersedia sebagai purwarupa lokal. Integrasi OTP pelanggan dan WhatsA
 
 Setelah `db:setup`, buat akun owner pertama dengan `npm run user:create`, lalu buat akun staf lain melalui perintah yang sama. Password minimal 12 karakter disimpan sebagai hash scrypt; akun tidak memiliki password demo bawaan. Akses CRM memerlukan sesi server-side, dan aksi memeriksa peran serta cabang.
 
+Login staf diblokir setelah lima kegagalan dalam 15 menit per email atau alamat IP, termasuk ketika password berikutnya benar. Pembatasan IP membaca `x-forwarded-for` atau `x-real-ip`; deployment harus memakai reverse proxy tepercaya yang mengganti header tersebut.
+
+## Pengelolaan data (CRUD)
+
+Pelanggan dapat dicari, diedit, diarsipkan, dan dipulihkan oleh staf berwenang. Arsip menonaktifkan akses pelanggan dan menghapus sesi/kode login aktif, tetapi mempertahankan transaksi, stamp, dan log persetujuan. Nomor WhatsApp tetap unik; pulihkan pelanggan yang diarsipkan alih-alih mendaftarkannya kembali.
+
+Stok dapat diedit atau dikeluarkan sementara dari katalog lalu dipulihkan. Wishlist dapat diedit, dinonaktifkan, atau dihapus oleh pemiliknya. Template reminder dapat diedit atau dinonaktifkan; template tanpa riwayat dapat dihapus. Transaksi dan riwayat stamp tidak dapat diedit atau dihapus. OWNER/MANAGER dapat membatalkan transaksi dengan alasan wajib pada hari kalender yang sama (Asia/Jakarta); transaksi asli tetap tersimpan, stamp hasilnya ditandai batal, dan penukaran stamp dipulihkan dengan jejak yang tetap tersimpan. Pembatalan ditolak jika stamp hasil transaksi sudah ditukar. Hanya OWNER yang dapat membuat dan mengelola akun staf; penonaktifan akun mencabut sesi tanpa menghapus riwayat.
+
+Menu **Notifikasi** tersedia untuk semua peran staf: template pesan wishlist dapat diubah untuk notifikasi berikutnya, dan log menampilkan status **Terkirim (simulasi)**. Isi log lama tetap sama. Status tersebut tidak berarti WhatsApp benar-benar terkirim.
+
 Login pelanggan memakai OTP acak hanya di lingkungan pengembangan; kode ditampilkan di terminal server dan kedaluwarsa setelah 5 menit. Login pelanggan di production ditolak sampai provider OTP WhatsApp disambungkan. Jangan gunakan purwarupa ini untuk data pelanggan nyata sebelum integrasi itu dan tinjauan keamanan selesai.
 
 Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `Authorization: Bearer <secret>`; tanpa konfigurasi endpoint menolak permintaan. Scheduler juga dapat dijalankan manual dari halaman Manajemen. Tidak ada `node-cron` yang berjalan otomatis.

@@ -13,14 +13,17 @@ const allNavigation: NavigationItem[] = [
   { href: "/kasir", label: "Kasir", icon: "◉", section: "OPERASIONAL" },
   { href: "/pelanggan", label: "Database pelanggan", icon: "♧", section: "OPERASIONAL" },
   { href: "/stok", label: "Stok", icon: "▦", section: "OPERASIONAL" },
+  { href: "/notifikasi", label: "Notifikasi", icon: "✉", section: "OPERASIONAL" },
   { href: "/manajemen", label: "Manajemen", icon: "↗", section: "MANAJEMEN" },
+  { href: "/akun", label: "Akun staf", icon: "♙", section: "PENGATURAN" },
+  { href: "/audit", label: "Jejak audit", icon: "▤", section: "PENGATURAN" },
 ];
 
 const menuByRole: Record<Role, string[]> = {
-  kasir: ["/kasir", "/pelanggan"],
-  stok: ["/stok"],
-  manajer: ["/kasir", "/stok", "/manajemen", "/pelanggan"],
-  marketing: ["/manajemen"],
+  kasir: ["/kasir", "/pelanggan", "/notifikasi"],
+  stok: ["/stok", "/notifikasi"],
+  manajer: ["/kasir", "/stok", "/notifikasi", "/manajemen", "/pelanggan"],
+  marketing: ["/notifikasi", "/manajemen"],
   pemilik: allNavigation.map(({ href }) => href),
 };
 

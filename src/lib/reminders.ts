@@ -7,6 +7,7 @@ import {
   REMINDER_HISTORY_SIZE,
   REMINDER_LEAD_DAYS,
 } from "./business-rules";
+import { SIMULATED_SENT_STATUS } from "./message-status";
 
 type ReminderCustomer = Customer & { transactions: Pick<Transaction, "createdAt">[] };
 
@@ -31,11 +32,12 @@ function personalSchedule(transactions: Pick<Transaction, "createdAt">[], now: D
 async function customersForTemplate(template: ReminderTemplate, now: Date) {
   const cooldown = daysBefore(REMINDER_COOLDOWN_DAYS, now);
   const where = {
+    active: true,
     optedOut: false,
     marketingConsent: true,
     reminderLogs: { none: { sentAt: { gte: cooldown } } },
     stockNotifications: { none: { sentAt: { gte: cooldown } } },
-    ...(template.segment === "NEW" ? { transactions: { none: {} } } : {}),
+    ...(template.segment === "NEW" ? { transactions: { none: { voidRecord: null } } } : {}),
   };
   if (template.segment !== "PERSONAL") {
     return db.customer.findMany({
@@ -50,6 +52,7 @@ async function customersForTemplate(template: ReminderTemplate, now: Date) {
       transactions: {
         orderBy: { createdAt: "desc" },
         take: REMINDER_HISTORY_SIZE,
+        where: { voidRecord: null },
         select: { createdAt: true },
       },
     },
@@ -57,8 +60,7 @@ async function customersForTemplate(template: ReminderTemplate, now: Date) {
   return customers.filter((customer) => personalSchedule(customer.transactions, now) !== null);
 }
 
-export async function processDueReminders(templateId?: string) {
-  const now = new Date();
+export async function processDueReminders(templateId?: string, now = new Date()) {
   const templates = await db.reminderTemplate.findMany({
     where: { active: true, ...(templateId ? { id: templateId } : {}) },
   });
@@ -73,17 +75,19 @@ export async function processDueReminders(templateId?: string) {
       const eligible = await tx.customer.findMany({
         where: {
           id: { in: dueCustomers.map(({ id }) => id) },
+          active: true,
           optedOut: false,
           marketingConsent: true,
           reminderLogs: { none: { sentAt: { gte: cooldown } } },
           stockNotifications: { none: { sentAt: { gte: cooldown } } },
-          ...(template.segment === "NEW" ? { transactions: { none: {} } } : {}),
+          ...(template.segment === "NEW" ? { transactions: { none: { voidRecord: null } } } : {}),
         },
         include: template.segment === "PERSONAL"
           ? {
               transactions: {
                 orderBy: { createdAt: "desc" },
                 take: REMINDER_HISTORY_SIZE,
+                where: { voidRecord: null },
                 select: { createdAt: true },
               },
             }
@@ -100,7 +104,7 @@ export async function processDueReminders(templateId?: string) {
           body: renderMessage(template.message, customer),
           scheduledFor,
           sentAt: now,
-          status: "SENT",
+          status: SIMULATED_SENT_STATUS,
         }];
       });
       if (!rows.length) return 0;

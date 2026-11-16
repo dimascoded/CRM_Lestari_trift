@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { createReminderTemplate, runReminderScheduler, sendReminderCampaign } from "@/app/actions";
+import { createReminderTemplate, deleteReminderTemplate, runReminderScheduler, sendReminderCampaign, setReminderTemplateActive, updateReminderTemplate } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
 import { currentTime, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, REMINDER_COOLDOWN_DAYS } from "@/lib/business-rules";
 import { getKpis } from "@/lib/kpi";
 import { db } from "@/lib/db";
+import { SIMULATED_SENT_STATUS, describeMessageStatus } from "@/lib/message-status";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const tabs = [
@@ -27,6 +29,7 @@ async function ManagementContent({ searchParams }: { searchParams: SearchParams 
   const tab: ManagementTab = tabs.find(({ id }) => id === requestedTab)?.id ?? "reminder";
   const status = typeof params.status === "string" ? params.status : undefined;
   const detail = typeof params.count === "string" ? params.count : undefined;
+  const editTemplateId = typeof params.edit === "string" ? params.edit : "";
   return (
     <div className="page-content">
       <PageHeader eyebrow="MANAJEMEN · LAPORAN" title="Marketing & laporan" description="Jalankan reminder dan pantau indikator pelanggan, stok, serta data ganda." />
@@ -34,7 +37,7 @@ async function ManagementContent({ searchParams }: { searchParams: SearchParams 
       <nav className="tabs management-tabs" aria-label="Tab laporan">
         {tabs.map(({ id, label }) => <Link className={`tab${tab === id ? " active" : ""}`} href={`/manajemen?tab=${id}`} key={id}>{label}</Link>)}
       </nav>
-      {tab === "reminder" && <ReminderTab />}
+      {tab === "reminder" && <ReminderTab editId={editTemplateId} />}
       {tab === "performa" && <PerformanceTab />}
       {tab === "stok" && <StockTab />}
       {tab === "duplikat" && <DuplicateTab />}
@@ -42,36 +45,50 @@ async function ManagementContent({ searchParams }: { searchParams: SearchParams 
   );
 }
 
-async function ReminderTab() {
+async function ReminderTab({ editId }: { editId: string }) {
   const templates = await db.reminderTemplate.findMany({
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { logs: true } } },
   });
+  const editingTemplate = templates.find(({ id }) => id === editId);
+  const action = editingTemplate ? updateReminderTemplate : createReminderTemplate;
   return (
     <div className="management-grid">
       <section className="form-card">
-        <h2>Buat template reminder</h2>
+        <h2>{editingTemplate ? "Ubah template reminder" : "Buat template reminder"}</h2>
         <p>Pengiriman simulasi mengecualikan opt-out dan membatasi satu pesan per {REMINDER_COOLDOWN_DAYS} hari per pelanggan.</p>
-        <form action={createReminderTemplate}>
+        {editId && !editingTemplate && <Notice status="template-not-found" />}
+        <form action={action}>
+          {editingTemplate && <input type="hidden" name="templateId" value={editingTemplate.id} />}
           <div className="form-grid">
-            <div className="field full"><label htmlFor="reminder-name">Nama template</label><input id="reminder-name" name="name" required maxLength={100} placeholder="Contoh: Kabar koleksi baru" /></div>
-            <div className="field full"><label htmlFor="reminder-message">Isi pesan</label><textarea id="reminder-message" name="message" required maxLength={1000} placeholder="Hai {nama}, ada koleksi baru yang mungkin kamu suka..." /></div>
-            <div className="field"><label htmlFor="reminder-segment">Segmen penerima</label><select id="reminder-segment" name="segment" required defaultValue="ALL"><option value="ALL">Semua pelanggan</option><option value="NEW">Pelanggan baru · belum transaksi</option><option value="PERSONAL">Reminder personal · ≥3 transaksi</option></select></div>
-            <div className="field"><label htmlFor="reminder-schedule">Jadwal (opsional)</label><input id="reminder-schedule" name="schedule" type="datetime-local" /><span className="field-hint">Waktu mengikuti WIB.</span></div>
+            <div className="field full"><label htmlFor="reminder-name">Nama template</label><input id="reminder-name" name="name" required maxLength={100} defaultValue={editingTemplate?.name ?? ""} placeholder="Contoh: Kabar koleksi baru" /></div>
+            <div className="field full"><label htmlFor="reminder-message">Isi pesan</label><textarea id="reminder-message" name="message" required maxLength={1000} defaultValue={editingTemplate?.message ?? ""} placeholder="Hai {nama}, ada koleksi baru yang mungkin kamu suka..." /><span className="field-hint">Gunakan {"{nama}"} untuk menyapa pelanggan dengan nama depan.</span></div>
+            <div className="field"><label htmlFor="reminder-segment">Segmen penerima</label><select id="reminder-segment" name="segment" required defaultValue={editingTemplate?.segment ?? "ALL"}><option value="ALL">Semua pelanggan</option><option value="NEW">Pelanggan baru · belum transaksi</option><option value="PERSONAL">Reminder personal · ≥3 transaksi</option></select></div>
+            <div className="field"><label htmlFor="reminder-schedule">Jadwal (opsional)</label><input id="reminder-schedule" name="schedule" type="datetime-local" defaultValue={editingTemplate?.schedule ? reminderDateTimeValue(editingTemplate.schedule) : ""} /><span className="field-hint">Waktu mengikuti WIB.</span></div>
           </div>
-          <div className="form-actions"><button className="button" type="submit">Simpan template</button></div>
+          <div className="form-actions">
+            <button className="button" type="submit">{editingTemplate ? "Simpan perubahan" : "Simpan template"}</button>
+            {editingTemplate && <Link className="button secondary" href="/manajemen?tab=reminder">Batal</Link>}
+          </div>
         </form>
         <div className="section-spacer warning-callout">Pengiriman hanya simulasi dalam database; bukan pesan WhatsApp sungguhan.</div>
       </section>
       <section className="panel">
-        <div className="panel-header"><div><h2 className="panel-title">Template reminder</h2><p className="panel-subtitle">Jalankan satu template atau semua jadwal yang sudah jatuh tempo.</p></div></div>
-        <div className="panel-body"><form action={runReminderScheduler}><button className="button" type="submit">Jalankan penjadwal sekarang</button></form></div>
+        <div className="panel-header"><div><h2 className="panel-title">Template reminder</h2><p className="panel-subtitle">Jalankan satu template aktif atau semua jadwal yang sudah jatuh tempo.</p></div></div>
+        <div className="panel-body"><form action={runReminderScheduler}><ConfirmSubmitButton className="button" confirmMessage="Jalankan simulasi reminder yang sudah jatuh tempo? Tidak ada WhatsApp yang dikirim.">Jalankan penjadwal</ConfirmSubmitButton></form></div>
         <div className="wishlist-list">
           {templates.map((template) => <article className="template-card" key={template.id}>
-            <div className="template-top"><strong>{template.name}</strong><span className="tag">{template.segment === "PERSONAL" ? "Personal" : template.segment === "NEW" ? "Pelanggan baru" : "Semua"}</span></div>
+            <div className="template-top"><strong>{template.name}</strong><span className={`status ${template.active ? "" : "neutral"}`}>{template.active ? "Aktif" : "Nonaktif"}</span></div>
+            <span className="tag">{template.segment === "PERSONAL" ? "Personal" : template.segment === "NEW" ? "Pelanggan baru" : "Semua"}</span>
             <p>{template.message}</p>
             <small>{template._count.logs} pesan tercatat{template.schedule ? ` · Jadwal ${new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(template.schedule)}` : ""}</small>
-            <form action={sendReminderCampaign} className="template-actions"><input type="hidden" name="templateId" value={template.id} /><button className="button small secondary" type="submit">Jalankan penjadwal</button></form>
+            <div className="template-actions">
+              <Link className="inline-action" href={`/manajemen?tab=reminder&edit=${encodeURIComponent(template.id)}`}>Ubah</Link>
+              {template.active && <form action={sendReminderCampaign}><input type="hidden" name="templateId" value={template.id} /><ConfirmSubmitButton className="inline-action" confirmMessage={`Jalankan simulasi template “${template.name}”? Tidak ada WhatsApp yang dikirim.`}>Jalankan</ConfirmSubmitButton></form>}
+              <form action={setReminderTemplateActive}><input type="hidden" name="templateId" value={template.id} /><input type="hidden" name="active" value={String(!template.active)} /><button className={`inline-action ${template.active ? "danger" : ""}`} type="submit">{template.active ? "Nonaktifkan" : "Aktifkan"}</button></form>
+              {template._count.logs === 0 && <form action={deleteReminderTemplate}><input type="hidden" name="templateId" value={template.id} /><ConfirmSubmitButton className="inline-action danger" confirmMessage={`Hapus template “${template.name}”?`}>Hapus</ConfirmSubmitButton></form>}
+              {template._count.logs > 0 && <small className="field-hint">Memiliki riwayat; gunakan nonaktifkan untuk mengarsipkan.</small>}
+            </div>
           </article>)}
           {!templates.length && <div className="empty-state">Belum ada template reminder.</div>}
         </div>
@@ -80,22 +97,40 @@ async function ReminderTab() {
   );
 }
 
+function reminderDateTimeValue(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
 async function PerformanceTab() {
   const now = currentTime();
   const start30 = daysBefore(30, now);
   const [logs, repeatGroups, kpis] = await Promise.all([
     db.reminderLog.findMany({
-      where: { sentAt: { gte: start30 } },
+      where: { sentAt: { gte: start30 }, status: SIMULATED_SENT_STATUS },
       orderBy: { sentAt: "desc" },
       take: 100,
       include: { customer: { select: { id: true, name: true } }, template: { select: { name: true } } },
     }),
-    db.transaction.groupBy({ by: ["customerId"], where: { createdAt: { gte: start30 } }, _count: { _all: true } }),
+    db.transaction.groupBy({
+      by: ["customerId"],
+      where: { createdAt: { gte: start30 }, voidRecord: null },
+      _count: { _all: true },
+    }),
     getKpis(),
   ]);
   const customerIds = [...new Set(logs.map(({ customerId }) => customerId))];
   const transactions = customerIds.length ? await db.transaction.findMany({
-    where: { customerId: { in: customerIds }, createdAt: { gte: start30 } },
+    where: { customerId: { in: customerIds }, createdAt: { gte: start30 }, voidRecord: null },
     select: { customerId: true, createdAt: true },
   }) : [];
   const converted = new Set(logs.filter((log) => transactions.some(({ customerId, createdAt }) =>
@@ -116,7 +151,8 @@ async function PerformanceTab() {
         <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>TEMPLATE</th><th>WAKTU SIMULASI</th><th>STATUS</th><th>KONVERSI SETELAH SIMULASI</th></tr></thead>
           <tbody>{logs.map((log) => {
             const convertedAfter = transactions.some(({ customerId, createdAt }) => customerId === log.customerId && createdAt > log.sentAt && createdAt <= new Date(log.sentAt.getTime() + 7 * 86400000));
-            return <tr key={log.id}><td>{log.customer.name}</td><td>{log.template.name}</td><td>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.sentAt)}</td><td>Simulasi dicatat</td><td>{convertedAfter ? "Ya" : "Belum"}</td></tr>;
+            const messageStatus = describeMessageStatus(log.status);
+            return <tr key={log.id}><td>{log.customer.name}</td><td>{log.template.name}</td><td>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.sentAt)}</td><td>{messageStatus.label}</td><td>{convertedAfter ? "Ya" : "Belum"}</td></tr>;
           })}{!logs.length && <tr><td className="table-empty" colSpan={5}>Belum ada pengiriman dalam 30 hari terakhir.</td></tr>}</tbody>
         </table></div>
       </section>
@@ -135,7 +171,7 @@ async function StockTab() {
       where: { type: "CHANGE", updatedAt: { gte: since7 } },
       select: { branchId: true, updatedAt: true },
     }),
-    db.stamp.groupBy({ by: ["branchId"], where: { dayKey: today }, _count: { _all: true } }),
+    db.stamp.groupBy({ by: ["branchId"], where: { dayKey: today, voidedAt: null }, _count: { _all: true } }),
     db.stockItem.findMany({
       where: { status: "AVAILABLE", enteredAt: { lt: daysBefore(DEAD_STOCK_DAYS, now) } },
       include: { branch: { select: { name: true } } },

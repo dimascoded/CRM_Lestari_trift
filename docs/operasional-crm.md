@@ -18,6 +18,8 @@ Dokumen ini menerjemahkan rencana CRM menjadi tata kerja dan gerbang pilot. Purw
 
 Peran akun aplikasi (`OWNER`, `MANAGER`, `CASHIER`, `STOCK_STAFF`, `MARKETING`) membatasi akses sesuai fungsi. Manajer/staf tetap harus memakai akun dan cabang yang ditugaskan; akses aplikasi tidak menggantikan persetujuan Steering Committee.
 
+OWNER dapat meninjau halaman Jejak Audit dalam mode baca-saja untuk aktivitas staf, perubahan consent, void, template, dan scheduler manual. Ringkasan audit tidak boleh memuat password, token sesi, kode OTP, atau isi pesan.
+
 ## 2. SOP harian
 
 ### Kasir: pelanggan, consent, transaksi, stamp
@@ -27,7 +29,8 @@ Peran akun aplikasi (`OWNER`, `MANAGER`, `CASHIER`, `STOCK_STAFF`, `MARKETING`) 
 - [ ] Verifikasi nominal transaksi sebelum menyimpan. Prototype memberi stamp jika nominal memenuhi minimum Rp150.000, maksimal satu stamp per pelanggan per hari.
 - [ ] Tawarkan penukaran saat pelanggan memiliki tiga stamp aktif: diskon 10% diterapkan pada transaksi jika dipilih. Pastikan pelanggan memahami nominal diskon dan total akhir.
 - [ ] Jika pelanggan bertanya tentang pesan, jelaskan bahwa di prototype notifikasi hanya simulasi lokal; tidak ada WhatsApp yang terkirim.
-- [ ] Laporkan duplikasi, transaksi salah, atau stamp yang tidak sesuai kepada manajer sebelum mencoba koreksi manual.
+- [ ] Laporkan duplikasi, transaksi salah, atau stamp yang tidak sesuai kepada manajer; kasir tidak mengubah atau menghapus transaksi.
+- [ ] OWNER/MANAGER dapat membatalkan transaksi yang salah pada hari kalender yang sama (Asia/Jakarta) dengan alasan wajib. Transaksi asli tetap ada; transaksi pengganti dicatat terpisah. Jika stamp hasil transaksi sudah ditukar atau riwayat penukaran lama tidak dapat dipastikan, pembatalan ditolak dan harus dieskalasikan ke Sponsor.
 
 ### Staf stok: katalog dan konfirmasi harian
 
@@ -94,6 +97,7 @@ Project Manager menyiapkan ringkasan dan Steering Committee meninjau:
 - [ ] Log perubahan katalog dan konfirmasi harian per cabang; konfirmasi saja tidak dihitung sebagai update aktual.
 - [ ] Transaksi, stamp, penukaran QA, pelanggan baru, indikasi duplikasi, consent/opt-out, serta insiden akses/data.
 - [ ] Reminder dan notifikasi wishlist sebagai **catatan simulasi**, termasuk jumlah, jadwal, cooldown, dan kendala; bukan bukti pengiriman WhatsApp.
+- [ ] Jejak audit tindakan staf dan perubahan consent; selidiki aktivitas yang tidak dikenal dan eskalasi sesuai prosedur insiden.
 - [ ] Keikutsertaan pelatihan, kelompok buy-in yang membutuhkan dukungan, serta umpan balik staf/pelanggan.
 - [ ] Status risiko, efektivitas mitigasi, pemilik tindak lanjut, dan apakah rollout dilanjutkan, ditahan, atau dihentikan.
 

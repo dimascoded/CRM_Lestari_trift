@@ -16,8 +16,8 @@ async function DashboardContent() {
   const now = currentTime();
   const today = jakartaDayKey(now);
   const [customers, stampsToday, availableStock, wishlistMatches, branches, transactions, kpis] = await Promise.all([
-    db.customer.count(),
-    db.stamp.count({ where: { dayKey: today } }),
+    db.customer.count({ where: { active: true } }),
+    db.stamp.count({ where: { dayKey: today, voidedAt: null } }),
     db.stockItem.count({ where: { status: "AVAILABLE" } }),
     db.stockMatchNotification.count(),
     db.branch.findMany({
@@ -28,6 +28,7 @@ async function DashboardContent() {
       },
     }),
     db.transaction.findMany({
+      where: { voidRecord: null },
       take: 6,
       orderBy: { createdAt: "desc" },
       include: { customer: true, branch: true },

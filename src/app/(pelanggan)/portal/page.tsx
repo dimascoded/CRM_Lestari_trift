@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { beginPortalLogin, createWishlist, logoutPortalCustomer, toggleWishlist, updateCustomerProfile, updateMessagePreference, verifyPortalLogin } from "@/app/actions";
+import { beginPortalLogin, createWishlist, deleteWishlist, logoutPortalCustomer, toggleWishlist, updateCustomerProfile, updateMessagePreference, updateWishlist, verifyPortalLogin } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { StockCatalog } from "@/components/StockCatalog";
 import { getCustomerSession } from "@/lib/auth";
-import { MESSAGE_CONSENT_TEXT, REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah } from "@/lib/business-rules";
+import { MESSAGE_CONSENT_TEXT, REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -30,12 +31,17 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
   const category = typeof params.category === "string" ? params.category : "";
   const size = typeof params.size === "string" ? params.size : "";
   const branch = typeof params.branch === "string" ? params.branch : "";
+  const requestedEditWishlist = typeof params.editWishlist === "string" ? params.editWishlist : "";
   const customer = customerSession
     ? await db.customer.findUnique({
         where: { id: customerSession.customer.id },
         include: {
           stamps: { orderBy: { createdAt: "desc" }, include: { branch: true } },
-          transactions: { orderBy: { createdAt: "desc" }, take: 3, include: { branch: true } },
+          transactions: {
+            orderBy: { createdAt: "desc" },
+            take: 3,
+            include: { branch: true, voidRecord: { select: { voidedAt: true } } },
+          },
           wishlists: { orderBy: { createdAt: "desc" } },
           stockNotifications: {
             orderBy: { sentAt: "desc" },
@@ -78,9 +84,10 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
     );
   }
 
-  const activeStamps = customer.stamps.filter(({ redeemedAt }) => !redeemedAt);
+  const activeStamps = customer.stamps.filter(({ redeemedAt, voidedAt }) => !redeemedAt && !voidedAt);
   const hasDiscount = activeStamps.length >= STAMPS_PER_REDEMPTION;
   const progress = activeStamps.length % STAMPS_PER_REDEMPTION;
+  const editingWishlist = customer.wishlists.find(({ id }) => id === requestedEditWishlist);
 
   return (
     <div className="page-content">
@@ -113,13 +120,13 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
                 <p className="stamp-note">{hasDiscount ? `Diskon ${REDEMPTION_DISCOUNT_PERCENT}% akan diterapkan otomatis saat kasir mencatat transaksi berikutnya.` : `${STAMPS_PER_REDEMPTION - progress} stamp lagi untuk mendapatkan diskon ${REDEMPTION_DISCOUNT_PERCENT}%.`}</p>
               </div>
               <div className="activity-list">
-                {customer.stamps.slice(0, 5).map((stamp) => <div className="activity-row" key={stamp.id}><span className="activity-dot" /><div className="activity-body"><strong>{stamp.branch.name}</strong><small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(stamp.createdAt)}</small></div><span className={`status ${stamp.redeemedAt ? "neutral" : ""}`}>{stamp.redeemedAt ? "Ditukar" : "1 stamp"}</span></div>)}
+                {customer.stamps.slice(0, 5).map((stamp) => <div className="activity-row" key={stamp.id}><span className="activity-dot" /><div className="activity-body"><strong>{stamp.branch.name}</strong><small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(stamp.createdAt)}</small></div><span className={`status ${stamp.redeemedAt || stamp.voidedAt ? "neutral" : ""}`}>{stamp.voidedAt ? "Dibatalkan" : stamp.redeemedAt ? "Ditukar" : "1 stamp"}</span></div>)}
               </div>
             </section>
             <section className="panel">
               <div className="panel-header"><div><h2 className="panel-title">Riwayat transaksi</h2><p className="panel-subtitle">Tiga transaksi terakhir</p></div></div>
               <div className="activity-list">
-                {customer.transactions.map((transaction) => <div className="activity-row" key={transaction.id}><span className="activity-dot" /><div className="activity-body"><strong>{transaction.branch.name}</strong><small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(transaction.createdAt)}</small></div><span className="activity-amount">{rupiah(transaction.amount - transaction.discountAmount)}</span></div>)}
+                {customer.transactions.map((transaction) => <div className="activity-row" key={transaction.id}><span className="activity-dot" /><div className="activity-body"><strong>{transaction.branch.name}</strong><small>{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Jakarta" }).format(transaction.createdAt)}</small></div>{transaction.voidRecord ? <span className="status neutral">Dibatalkan</span> : <span className="activity-amount">{rupiah(transaction.amount - transaction.discountAmount)}</span>}</div>)}
                 {!customer.transactions.length && <div className="empty-state">Belum ada transaksi.</div>}
               </div>
               <div className="panel-header"><div><h2 className="panel-title">Notifikasi stok</h2><p className="panel-subtitle">Simulasi pesan barang yang cocok</p></div></div>
@@ -134,19 +141,28 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
 
       {tab === "wishlist" && (
         <section className="form-card portal-section">
-          <h2>Wishlist</h2><p>Tambahkan kategori, ukuran, atau kata kunci yang sedang dicari.</p>
-          <form action={createWishlist}>
+          <h2>{editingWishlist ? "Ubah wishlist" : "Wishlist"}</h2><p>{editingWishlist ? "Perbarui kriteria; riwayat notifikasi yang sudah tercatat tetap disimpan." : "Tambahkan kategori, ukuran, atau kata kunci yang sedang dicari."}</p>
+          {requestedEditWishlist && !editingWishlist && <Notice status="invalid-wishlist-id" />}
+          <form action={editingWishlist ? updateWishlist : createWishlist}>
+            {editingWishlist && <input type="hidden" name="wishlistId" value={editingWishlist.id} />}
             <div className="form-grid">
-              <div className="field"><label htmlFor="wishlist-category">Kategori</label><select id="wishlist-category" name="category" defaultValue=""><option value="">Semua</option><option>Atasan</option><option>Bawahan</option><option>Dress</option><option>Outer</option><option>Aksesori</option><option>Sepatu</option></select></div>
-              <div className="field"><label htmlFor="wishlist-size">Ukuran</label><select id="wishlist-size" name="size" defaultValue=""><option value="">Semua</option>{["XS", "S", "M", "L", "XL", "XXL", "All size"].map((size) => <option key={size}>{size}</option>)}</select></div>
-              <div className="field full"><label htmlFor="wishlist-keyword">Kata kunci</label><input id="wishlist-keyword" name="keyword" placeholder="linen, floral, denim..." /></div>
+              <div className="field"><label htmlFor="wishlist-category">Kategori</label><select id="wishlist-category" name="category" defaultValue={editingWishlist?.category ?? ""}><option value="">Semua kategori</option>{STOCK_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></div>
+              <div className="field"><label htmlFor="wishlist-size">Ukuran</label><select id="wishlist-size" name="size" defaultValue={editingWishlist?.size ?? ""}><option value="">Semua ukuran</option>{STOCK_SIZES.map((size) => <option key={size}>{size}</option>)}</select></div>
+              <div className="field full"><label htmlFor="wishlist-keyword">Kata kunci</label><input id="wishlist-keyword" name="keyword" maxLength={80} defaultValue={editingWishlist?.keyword ?? ""} placeholder="linen, floral, denim..." /></div>
             </div>
-            <div className="form-actions"><button className="button" type="submit">＋ Tambah wishlist</button></div>
+            <div className="form-actions">
+              <button className="button" type="submit">{editingWishlist ? "Simpan perubahan" : "＋ Tambah wishlist"}</button>
+              {editingWishlist && <Link className="button secondary" href="/portal?tab=wishlist">Batal</Link>}
+            </div>
           </form>
           <div className="wishlist-list section-spacer">
             {customer.wishlists.map((item) => <div className="template-card" key={item.id}>
               <div className="template-top"><strong>{[item.category, item.size, item.keyword].filter(Boolean).join(" · ") || "Semua barang"}</strong><span className={`status ${item.active ? "" : "neutral"}`}>{item.active ? "Aktif" : "Nonaktif"}</span></div>
-              <form action={toggleWishlist} className="template-actions"><input type="hidden" name="wishlistId" value={item.id} /><input type="hidden" name="active" value={String(!item.active)} /><button className={`inline-action ${item.active ? "danger" : ""}`} type="submit">{item.active ? "Nonaktifkan" : "Aktifkan kembali"}</button></form>
+              <div className="template-actions">
+                <Link className="inline-action" href={`/portal?tab=wishlist&editWishlist=${encodeURIComponent(item.id)}`}>Ubah</Link>
+                <form action={toggleWishlist}><input type="hidden" name="wishlistId" value={item.id} /><input type="hidden" name="active" value={String(!item.active)} /><button className={`inline-action ${item.active ? "danger" : ""}`} type="submit">{item.active ? "Nonaktifkan" : "Aktifkan kembali"}</button></form>
+                <form action={deleteWishlist}><input type="hidden" name="wishlistId" value={item.id} /><ConfirmSubmitButton className="inline-action danger" confirmMessage="Hapus wishlist ini? Riwayat notifikasi yang sudah dibuat tetap ada.">Hapus</ConfirmSubmitButton></form>
+              </div>
             </div>)}
             {!customer.wishlists.length && <div className="empty-state">Belum ada wishlist.</div>}
           </div>

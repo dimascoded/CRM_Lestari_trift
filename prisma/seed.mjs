@@ -112,6 +112,7 @@ async function main() {
             transactionId: transaction.id,
             branchId: plan.branch.id,
             dayKey: dayKey(createdAt),
+            activeDayKey: dayKey(createdAt),
             createdAt,
           },
         });
