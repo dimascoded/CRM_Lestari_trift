@@ -10,20 +10,21 @@ type NavigationItem = { href: string; label: string; icon: string; section: stri
 
 const allNavigation: NavigationItem[] = [
   { href: "/", label: "Beranda", icon: "⌂", section: "UTAMA" },
+  { href: "/strategi", label: "Strategi CRM", icon: "✧", section: "UTAMA" },
   { href: "/kasir", label: "Kasir", icon: "◉", section: "OPERASIONAL" },
   { href: "/pelanggan", label: "Database pelanggan", icon: "♧", section: "OPERASIONAL" },
   { href: "/stok", label: "Stok", icon: "▦", section: "OPERASIONAL" },
-  { href: "/notifikasi", label: "Notifikasi", icon: "✉", section: "OPERASIONAL" },
-  { href: "/manajemen", label: "Manajemen", icon: "↗", section: "MANAJEMEN" },
+  { href: "/pesan", label: "Pesan", icon: "✉", section: "OPERASIONAL" },
+  { href: "/laporan", label: "Laporan", icon: "↗", section: "LAPORAN" },
   { href: "/akun", label: "Akun staf", icon: "♙", section: "PENGATURAN" },
   { href: "/audit", label: "Jejak audit", icon: "▤", section: "PENGATURAN" },
 ];
 
 const menuByRole: Record<Role, string[]> = {
-  kasir: ["/kasir", "/pelanggan", "/notifikasi"],
-  stok: ["/stok", "/notifikasi"],
-  manajer: ["/kasir", "/stok", "/notifikasi", "/manajemen", "/pelanggan"],
-  marketing: ["/notifikasi", "/manajemen"],
+  kasir: ["/kasir", "/pelanggan", "/pesan", "/strategi"],
+  stok: ["/stok", "/pesan", "/strategi"],
+  manajer: ["/", "/strategi", "/kasir", "/pelanggan", "/stok", "/pesan", "/laporan"],
+  marketing: ["/pesan", "/laporan", "/strategi"],
   pemilik: allNavigation.map(({ href }) => href),
 };
 

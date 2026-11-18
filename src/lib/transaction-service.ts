@@ -20,11 +20,13 @@ export async function recordTransactionRecord({
   branchId,
   amount,
   useStampDiscount,
+  stampOffered = true,
 }: {
   customerId: string;
   branchId: string;
   amount: number;
   useStampDiscount: boolean;
+  stampOffered?: boolean;
 }): Promise<TransactionOutcome | null> {
   const now = new Date();
   const dayKey = jakartaDayKey(now);
@@ -78,7 +80,7 @@ export async function recordTransactionRecord({
     }
 
     const transaction = await tx.transaction.create({
-      data: { customerId, branchId, amount, discountAmount, redemptionId, createdAt: now },
+      data: { customerId, branchId, amount, discountAmount, redemptionId, stampOffered, createdAt: now },
     });
     if (amount < STAMP_MINIMUM_TRANSACTION) return { result: "below-minimum", discountAmount };
     if (todaysStamp) return { result: "already-stamped", discountAmount };

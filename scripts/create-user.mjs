@@ -2,64 +2,11 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/password.ts";
+import { askHidden } from "./hidden-input.mjs";
 
 const db = new PrismaClient();
 const roles = ["CASHIER", "STOCK_STAFF", "MANAGER", "MARKETING", "OWNER"];
 const input = createInterface({ input: stdin, output: stdout });
-
-function askHidden(label) {
-  stdout.write(label);
-  const wasRaw = stdin.isRaw;
-  stdin.setRawMode(true);
-  stdin.resume();
-  return new Promise((resolve, reject) => {
-    let value = "";
-    let settled = false;
-    const cleanup = () => {
-      stdin.off("data", onData);
-      stdin.off("end", onEnd);
-      stdin.off("error", onError);
-      stdin.setRawMode(Boolean(wasRaw));
-      stdin.pause();
-    };
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      stdout.write("\n");
-      reject(error);
-    };
-    const onData = (chunk) => {
-      for (const character of chunk.toString()) {
-        if (character === "\u0003") {
-          fail(new Error("User provisioning cancelled."));
-          return;
-        }
-        if (character === "\u0004") {
-          fail(new Error("Password input cancelled."));
-          return;
-        }
-        if (character === "\r" || character === "\n") {
-          settled = true;
-          cleanup();
-          stdout.write("\n");
-          resolve(value);
-          return;
-        }
-        if (character === "\u007f" || character === "\b") {
-          value = Array.from(value).slice(0, -1).join("");
-        } else if (character >= " ") {
-          value += character;
-        }
-      }
-    };
-    const onEnd = () => fail(new Error("Password input ended."));
-    const onError = (error) => fail(error);
-    stdin.on("data", onData);
-    stdin.once("end", onEnd);
-    stdin.once("error", onError);
-  });
-}
 
 async function main() {
   if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {

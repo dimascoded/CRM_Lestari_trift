@@ -26,7 +26,7 @@ OWNER dapat meninjau halaman Jejak Audit dalam mode baca-saja untuk aktivitas st
 
 - [ ] Cari nomor WhatsApp sebelum mendaftarkan pelanggan baru; jangan membuat akun baru hanya karena nama berbeda ejaan.
 - [ ] Saat pendaftaran, catat persetujuan pesan hanya jika pelanggan menyatakannya. Jangan centang atas nama pelanggan. Penolakan tidak menghalangi transaksi atau stamp.
-- [ ] Verifikasi nominal transaksi sebelum menyimpan. Prototype memberi stamp jika nominal memenuhi minimum Rp150.000, maksimal satu stamp per pelanggan per hari.
+- [ ] Verifikasi nominal transaksi sebelum menyimpan. Prototype memberi stamp jika nominal memenuhi minimum Rp100.000, maksimal satu stamp per pelanggan per hari.
 - [ ] Tawarkan penukaran saat pelanggan memiliki tiga stamp aktif: diskon 10% diterapkan pada transaksi jika dipilih. Pastikan pelanggan memahami nominal diskon dan total akhir.
 - [ ] Jika pelanggan bertanya tentang pesan, jelaskan bahwa di prototype notifikasi hanya simulasi lokal; tidak ada WhatsApp yang terkirim.
 - [ ] Laporkan duplikasi, transaksi salah, atau stamp yang tidak sesuai kepada manajer; kasir tidak mengubah atau menghapus transaksi.
@@ -36,7 +36,7 @@ OWNER dapat meninjau halaman Jejak Audit dalam mode baca-saja untuk aktivitas st
 
 - [ ] Cocokkan rak/barang dengan katalog pada awal atau akhir shift sesuai jadwal cabang.
 - [ ] Catat perubahan aktual (barang baru, edit data, atau status terjual) di cabang yang benar. Perubahan katalog dan konfirmasi stok adalah dua aktivitas berbeda.
-- [ ] Setelah pemeriksaan, catat konfirmasi stok harian. Konfirmasi tanpa perubahan katalog **bukan** update stok aktual untuk KPI.
+- [ ] Setelah pemeriksaan, catat jumlah fisik. Sistem menyimpan jumlah fisik dan jumlah barang `AVAILABLE`; selisih tetap tercatat dan harus diperiksa. Konfirmasi tanpa perubahan katalog tetap dihitung S4 bila jumlah fisik diisi.
 - [ ] Laporkan barang hilang, selisih jumlah, atau katalog yang tidak dapat diperbarui kepada manajer; jangan biarkan barang yang sudah terjual tampak tersedia.
 - [ ] Manajer memeriksa log perubahan dan konfirmasi setiap hari kerja. Catat alasan bila cabang tidak melakukan perubahan katalog pada hari tertentu.
 
@@ -45,8 +45,9 @@ OWNER dapat meninjau halaman Jejak Audit dalam mode baca-saja untuk aktivitas st
 - [ ] Periksa bahwa persetujuan pesan masih aktif dan pelanggan belum opt-out sebelum meninjau calon penerima.
 - [ ] Periksa ketersediaan serta cabang barang yang cocok sebelum menindaklanjuti wishlist. Kecocokan di katalog bukan jaminan stok fisik.
 - [ ] Sistem menerapkan satu catatan simulasi per pelanggan dalam cooldown gabungan tujuh hari untuk reminder dan notifikasi wishlist. Jangan membuat catatan/pesan manual untuk mengakali cooldown.
-- [ ] Jalankan hanya template aktif yang sudah ditinjau dan sudah jatuh tempo. Tinjau jumlah penerima dan contoh isi sebelum demo.
+- [ ] Jalankan hanya template aktif yang sudah ditinjau dan sudah jatuh tempo. Reminder personal dijadwalkan pukul 09.00 Asia/Jakarta pada hari lead time. Tinjau jumlah penerima dan contoh isi sebelum demo.
 - [ ] Catat hasil sebagai **simulasi**. Status pada aplikasi bukan bukti delivery, pembacaan, atau konversi akibat pesan.
+- [ ] Gunakan antrean `/pesan?tab=antrean` untuk tindak lanjut; pelanggan yang baru ditandai dihubungi disembunyikan tujuh hari.
 - [ ] Hentikan tindak lanjut pesan saat pelanggan mencabut persetujuan; laporkan permintaan dan masalah consent kepada manajer/marketing.
 
 ## 3. Pelatihan dan adopsi perubahan
@@ -101,6 +102,14 @@ Project Manager menyiapkan ringkasan dan Steering Committee meninjau:
 - [ ] Keikutsertaan pelatihan, kelompok buy-in yang membutuhkan dukungan, serta umpan balik staf/pelanggan.
 - [ ] Status risiko, efektivitas mitigasi, pemilik tindak lanjut, dan apakah rollout dilanjutkan, ditahan, atau dihentikan.
 
+### KPI dan scheduler
+
+- **S2:** persentase cabang yang memiliki uji tukar stamp dan hasil uji terakhir/lulus; bila ada cabang belum diuji, nilai KPI 0 dan nama cabang ditampilkan.
+- **S4:** pasangan cabang-hari dalam tujuh hari yang memiliki log perubahan katalog atau konfirmasi dengan jumlah fisik terisi, dibagi seluruh pasangan cabang-hari.
+- **S6:** simulasi reminder yang tercatat dalam ±60 menit dari jadwal dibagi simulasi yang memiliki jadwal. Semua pesan tetap simulasi.
+- Scheduler lokal opsional hanya berjalan dengan `ENABLE_LOCAL_SCHEDULER=true`, setiap 15 menit; default nonaktif. `ROLLOUT_GATING=off` hanya untuk demo dan melewati gerbang fitur per cabang.
+- Minimum transaksi stamp adalah Rp100.000. Fitur wishlist/notifikasi aktif mulai tahap 2; reminder aktif setelah cabang dengan tahap tertinggi mencapai tahap 3.
+
 Simpan keputusan rapat, metrik yang digunakan, definisi/periode pengukuran, dan tindakan tindak lanjut. Tinjau business case setelah enam bulan memakai baseline enam bulan sebelum rollout; data seed bukan baseline operasional.
 
 ## 6. Gerbang uji dan pilot
@@ -121,7 +130,7 @@ Simpan keputusan rapat, metrik yang digunakan, definisi/periode pengukuran, dan 
 - [ ] Sponsor mengesahkan Yogyakarta dan Magelang sebagai cabang pilot dan menunjuk Project Manager, perwakilan tim, jadwal, anggaran, pemilik data, serta periode evaluasi.
 - [ ] Pastikan lingkungan, akun staf, cabang, serta data uji sintetis siap; tidak ada data pelanggan nyata.
 - [ ] Latih staf yang bertugas dan catat hasil latihan. Pastikan mereka dapat membedakan perubahan katalog, konfirmasi stok, persetujuan pesan, dan simulasi pesan.
-- [ ] QA alur transaksi, minimum stamp, batas satu stamp per hari, penukaran tiga stamp, akses lintas cabang yang diizinkan, opt-out, cooldown, wishlist, dan reminder jatuh tempo.
+- [ ] QA alur transaksi (minimum stamp Rp100.000), batas satu stamp per hari, penukaran tiga stamp, akses lintas cabang yang diizinkan, opt-out, cooldown, wishlist, dan reminder jatuh tempo.
 - [ ] Di pilot, uji pelanggan yang mengumpulkan stamp di satu cabang dan menukarnya di cabang pilot lainnya; uji pula katalog bersama, kecocokan wishlist, dan perbedaan log perubahan vs konfirmasi stok. Target QA penukaran adalah 100% percobaan uji berhasil.
 - [ ] Sebelum rollout penuh, QA konfigurasi keempat cabang dengan data sintetis; catat setiap kegagalan dan retest setelah perbaikan.
 - [ ] Pastikan kontrol akses, backup/pemulihan lokal, dan prosedur insiden telah ditinjau. Endpoint scheduler, bila dipakai, harus memakai `REMINDER_CRON_SECRET`; jangan mengekspos tanpa kontrol tersebut.

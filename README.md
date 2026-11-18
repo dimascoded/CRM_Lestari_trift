@@ -52,15 +52,15 @@ Pelanggan dapat dicari, diedit, diarsipkan, dan dipulihkan oleh staf berwenang. 
 
 Stok dapat diedit atau dikeluarkan sementara dari katalog lalu dipulihkan. Wishlist dapat diedit, dinonaktifkan, atau dihapus oleh pemiliknya. Template reminder dapat diedit atau dinonaktifkan; template tanpa riwayat dapat dihapus. Transaksi dan riwayat stamp tidak dapat diedit atau dihapus. OWNER/MANAGER dapat membatalkan transaksi dengan alasan wajib pada hari kalender yang sama (Asia/Jakarta); transaksi asli tetap tersimpan, stamp hasilnya ditandai batal, dan penukaran stamp dipulihkan dengan jejak yang tetap tersimpan. Pembatalan ditolak jika stamp hasil transaksi sudah ditukar. Hanya OWNER yang dapat membuat dan mengelola akun staf; penonaktifan akun mencabut sesi tanpa menghapus riwayat.
 
-Menu **Notifikasi** tersedia untuk semua peran staf: template pesan wishlist dapat diubah untuk notifikasi berikutnya, dan log menampilkan status **Terkirim (simulasi)**. Isi log lama tetap sama. Status tersebut tidak berarti WhatsApp benar-benar terkirim.
+Menu **Pesan** menyediakan antrean tindak lanjut, reminder, notifikasi wishlist, dan log simulasi. Laporan operasional berada di `/laporan`, profil pelanggan di `/pelanggan/[id]`, dan ringkasan strategi di `/strategi`.
 
 Login pelanggan memakai OTP acak hanya di lingkungan pengembangan; kode ditampilkan di terminal server dan kedaluwarsa setelah 5 menit. Login pelanggan di production ditolak sampai provider OTP WhatsApp disambungkan. Jangan gunakan purwarupa ini untuk data pelanggan nyata sebelum integrasi itu dan tinjauan keamanan selesai.
 
-Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `Authorization: Bearer <secret>`; tanpa konfigurasi endpoint menolak permintaan. Scheduler juga dapat dijalankan manual dari halaman Manajemen. Tidak ada `node-cron` yang berjalan otomatis.
+Scheduler manual tersedia di **Pesan → Reminder**. Scheduler lokal opsional berjalan setiap 15 menit hanya ketika `ENABLE_LOCAL_SCHEDULER=true`; nilai default tidak aktif. Proses membuat catatan simulasi saja dan tidak mengirim pesan nyata. `ROLLOUT_GATING=off` melewati pembatasan tahap rollout untuk demo; default `on`.
 
 ## Nilai demo dan batasan
 
-- Nominal minimum transaksi untuk mendapat stamp adalah **Rp150.000**.
+- Nominal minimum transaksi untuk mendapat stamp adalah **Rp100.000**.
 - Penukaran tiga stamp memberi diskon **10%**.
 - Aturan stamp disimpan di `src/lib/business-rules.ts`.
 - Pesan memerlukan persetujuan eksplisit. Pendaftaran kasir tidak memilih persetujuan otomatis; persetujuan dan pencabutan dicatat beserta sumber, versi teks, dan waktunya. Pelanggan lama dimigrasikan tanpa persetujuan.
@@ -76,10 +76,10 @@ Endpoint scheduler perlu `REMINDER_CRON_SECRET` minimal 32 karakter dan header `
 Gunakan baseline enam bulan sebelum roll-out dan evaluasi hasil pada enam bulan setelahnya. Nilai baseline yang dimuat seed (misalnya 40 pelanggan repeat dan frekuensi 1,6) hanya data demo, bukan hasil ukur operasional.
 
 - **Duplikasi <2%:** jumlah akun pelanggan duplikat dibagi total akun pelanggan; percobaan pendaftaran ganda dilaporkan terpisah.
-- **Stamp 100%:** penukaran QA yang berhasil dibagi seluruh percobaan penukaran QA, dengan pengujian di keempat cabang.
+- **S2 · Uji tukar stamp:** setiap cabang harus memiliki minimal satu uji; nilai adalah jumlah uji lulus dibagi total uji. Nilai 0% bila masih ada cabang yang belum diuji.
 - **Repeat purchase +25%:** jumlah pelanggan dengan lebih dari satu transaksi pada periode ukur dibanding baseline sejenis; contoh seed 40 menjadi 50.
-- **Update stok ≥90%:** hari-cabang dengan pencatatan stok aktual dibagi seluruh hari-cabang yang wajib diperbarui. Konfirmasi tanpa pencatatan stok bukan pembaruan aktual.
+- **S4 · Update stok ≥90%:** pasangan cabang-hari dengan perubahan katalog atau konfirmasi jumlah hitung fisik dibagi seluruh hari-cabang pada jendela tujuh hari. Konfirmasi menyimpan hitung fisik dan hitung sistem; selisih tetap dicatat dengan peringatan.
 - **Stok mati turun 20%:** jumlah stok mati di akhir periode dibanding baseline; contoh seed 25 menjadi maksimal 20.
-- **Reminder tepat jadwal ≥95%:** simulasi reminder yang dicatat dalam rentang ±60 menit dari jadwal dibagi seluruh simulasi yang memiliki jadwal. Ini bukan bukti pengiriman WhatsApp; toleransi 60 menit masih asumsi purwarupa.
+- **S6 · Reminder tepat jadwal ≥95%:** simulasi yang dicatat dalam rentang ±60 menit dari jadwal dibagi seluruh simulasi yang memiliki jadwal. Jadwal personal ditetapkan pukul 09.00 Asia/Jakarta pada hari lead time; scheduler lokal opsional hanya membuat log simulasi.
 - **Frekuensi belanja +15%:** transaksi per pelanggan aktif per 30 hari dibanding baseline sejenis; contoh seed 1,6 menjadi 1,84.
 - **Konversi reminder ≥20%:** pelanggan unik yang bertransaksi dalam 7 hari setelah simulasi reminder dicatat dibagi pelanggan unik dengan simulasi reminder tercatat. Ini bukan pengukuran delivery nyata.

@@ -1,6 +1,7 @@
 import { Prisma, type StockItem, type Wishlist } from "@prisma/client";
 import { DEFAULT_STOCK_NOTIFICATION_MESSAGE, daysBefore, REMINDER_COOLDOWN_DAYS } from "./business-rules";
 import { SIMULATED_SENT_STATUS } from "./message-status";
+import { featureEnabledForBranch } from "./rollout";
 
 type Transaction = Prisma.TransactionClient;
 
@@ -64,6 +65,12 @@ async function createMissingNotifications(tx: Transaction, rows: { stockItemId: 
 
 export async function matchStockItem(tx: Transaction, item: StockItem) {
   if (item.status !== "AVAILABLE") return 0;
+  const stockBranch = await tx.branch.findUnique({
+    where: { id: item.branchId },
+    select: { name: true, rolloutStage: true },
+  });
+  if (!stockBranch) throw new Error(`Stock item ${item.id} references a missing branch.`);
+  if (!featureEnabledForBranch("stockNotification", stockBranch)) return 0;
   const wishlists = await tx.wishlist.findMany({
     where: { active: true, customer: { active: true, optedOut: false, marketingConsent: true } },
     include: { customer: { select: { name: true } } },
@@ -74,7 +81,7 @@ export async function matchStockItem(tx: Transaction, item: StockItem) {
   const matchingCustomerIds = matchingWishlists.map(({ customerId }) => customerId);
   const recentlyMessaged = await customersWithRecentMessages(tx, matchingCustomerIds);
   const [branch, template] = await Promise.all([
-    tx.branch.findUnique({ where: { id: item.branchId }, select: { name: true } }),
+    Promise.resolve(stockBranch),
     tx.stockNotificationTemplate.findUnique({ where: { id: "wishlist" }, select: { message: true } }),
   ]);
   if (!branch) throw new Error(`Stock item ${item.id} references a missing branch.`);
@@ -103,9 +110,11 @@ export async function matchWishlist(tx: Transaction, wishlist: Wishlist) {
   if ((await customersWithRecentMessages(tx, [wishlist.customerId])).has(wishlist.customerId)) return 0;
   const items = await tx.stockItem.findMany({
     where: { status: "AVAILABLE" },
-    include: { branch: { select: { name: true } } },
+    include: { branch: { select: { name: true, rolloutStage: true } } },
   });
-  const matchingItems = items.filter((item) => matchesWishlist(wishlist, item));
+  const matchingItems = items.filter((item) =>
+    featureEnabledForBranch("stockNotification", item.branch) && matchesWishlist(wishlist, item),
+  );
   const item = matchingItems[0];
   if (!item) return 0;
   const template = await tx.stockNotificationTemplate.findUnique({

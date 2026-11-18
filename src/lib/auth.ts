@@ -15,7 +15,7 @@ const STAFF_HOME: Record<StaffRole, string> = {
   CASHIER: "/kasir",
   STOCK_STAFF: "/stok",
   MANAGER: "/",
-  MARKETING: "/manajemen",
+  MARKETING: "/pesan",
   OWNER: "/",
 };
 

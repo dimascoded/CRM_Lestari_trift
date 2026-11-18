@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { db } from "./db";
-import { MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT } from "./business-rules";
+import { ACQUISITION_CHANNELS, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT } from "./business-rules";
 import { writeAuditLog } from "./audit-service";
 
 export async function registerCustomerRecord(
@@ -9,7 +9,11 @@ export async function registerCustomerRecord(
   branchId: string,
   marketingConsent = false,
   actorUserId: string | null = null,
+  acquisitionChannel = "DATANG_LANGSUNG",
 ) {
+  if (!(Object.keys(ACQUISITION_CHANNELS) as string[]).includes(acquisitionChannel)) {
+    throw new Error("Invalid customer acquisition channel.");
+  }
   const duplicate = await db.customer.findUnique({ where: { whatsapp } });
   if (duplicate) {
     await db.duplicateCheckLog.create({
@@ -20,7 +24,7 @@ export async function registerCustomerRecord(
   try {
     const customer = await db.$transaction(async (tx) => {
       const created = await tx.customer.create({
-        data: { name, whatsapp, registeredAtId: branchId, marketingConsent },
+        data: { name, whatsapp, registeredAtId: branchId, marketingConsent, acquisitionChannel },
       });
       await tx.messageConsent.create({
         data: {
@@ -68,6 +72,7 @@ export async function setCustomerMarketingConsent(
   customerId: string,
   marketingConsent: boolean,
   source: string,
+  actorUserId?: string | null,
 ) {
   const current = await tx.customer.findUnique({
     where: { id: customerId },
@@ -94,6 +99,7 @@ export async function setCustomerMarketingConsent(
     },
   });
   await writeAuditLog(tx, {
+    userId: actorUserId,
     action,
     entity: "CUSTOMER",
     entityId: customerId,
@@ -105,4 +111,19 @@ export async function setCustomerMarketingConsent(
         : "Persetujuan pesan tidak diberikan.",
   });
   return updated;
+}
+
+export async function recordCashierConsentRecord({
+  customerId,
+  userId,
+  checked,
+  consentText,
+}: {
+  customerId: string;
+  userId: string;
+  checked: boolean;
+  consentText: string;
+}) {
+  if (!checked || consentText !== MESSAGE_CONSENT_TEXT) return null;
+  return db.$transaction((tx) => setCustomerMarketingConsent(tx, customerId, true, "CASHIER", userId));
 }

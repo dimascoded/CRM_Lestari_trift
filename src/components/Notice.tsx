@@ -32,6 +32,18 @@ const messages: Record<string, { text: string; tone?: "success" | "warning" | "e
   "stock-already-sold": { text: "Barang ini sudah ditandai terjual.", tone: "warning" },
   "stock-added": { text: "Stok tersimpan dan wishlist yang cocok sudah diperiksa.", tone: "success" },
   "stock-confirmed": { text: "Stok cabang dikonfirmasi untuk hari ini.", tone: "success" },
+  "stock-count-mismatch": { text: "Jumlah hitung fisik berbeda dengan catatan sistem. Konfirmasi tetap tersimpan; periksa kembali stok tersedia.", tone: "warning" },
+  "invalid-stock-count": { text: "Jumlah hitung fisik wajib berupa bilangan bulat nol atau lebih.", tone: "error" },
+  "consent-recorded": { text: "Persetujuan pesan dicatat dari kasir.", tone: "success" },
+  "consent-required": { text: "Persetujuan hanya dapat dicatat setelah pelanggan mencentang pernyataan persetujuan.", tone: "error" },
+  "consent-opted-out": { text: "Pelanggan telah memilih berhenti menerima pesan; jangan catat persetujuan dari kasir.", tone: "warning" },
+  "rollout-feature-disabled": { text: "Fitur belum aktif di tahap roll-out cabang ini.", tone: "warning" },
+  "qa-check-recorded": { text: "Hasil uji tukar stamp berhasil dicatat.", tone: "success" },
+  "invalid-qa-check": { text: "Pilih cabang dan hasil uji yang valid.", tone: "error" },
+  "invalid-rollout-stage": { text: "Tahap roll-out harus berupa angka 1 sampai 3.", tone: "error" },
+  "rollout-stage-updated": { text: "Tahap roll-out cabang berhasil diperbarui.", tone: "success" },
+  "followup-recorded": { text: "Tindak lanjut pelanggan dicatat; pelanggan disembunyikan dari antrean selama tujuh hari.", tone: "success" },
+  "invalid-followup": { text: "Antrean atau catatan tindak lanjut tidak valid.", tone: "error" },
   "invalid-wishlist": { text: "Isi setidaknya satu kriteria wishlist.", tone: "error" },
   "invalid-wishlist-id": { text: "Item wishlist tidak valid.", tone: "error" },
   "wishlist-created": { text: "Wishlist berhasil ditambahkan.", tone: "success" },
@@ -89,6 +101,8 @@ export function Notice({
     ? `Diskon stamp ${rupiah(discountAmount)} diterapkan, total bayar ${rupiah(transactionAmount - discountAmount)}. ${message.text}`
     : status === "stock-added" && detail
       ? `Stok tersimpan. ${detail} wishlist cocok ditemukan; simulasi notifikasi WhatsApp dibuat.`
-      : message.text;
+      : status === "stock-count-mismatch" && detail
+        ? `${message.text} Jumlah tersedia menurut sistem: ${detail}.`
+        : message.text;
   return <div className={`notice ${message.tone ?? "success"}`}>{text}</div>;
 }

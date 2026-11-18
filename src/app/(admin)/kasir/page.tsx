@@ -1,21 +1,25 @@
 import Link from "next/link";
-import { registerCustomer, recordTransaction, voidTransaction } from "@/app/actions";
+import { recordCashierConsent, registerCustomer, recordTransaction, voidTransaction } from "@/app/actions";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
 import {
   currentTime,
+  ACQUISITION_CHANNELS,
   jakartaDayKey,
   MESSAGE_CONSENT_TEXT,
   normalizeWhatsApp,
   REDEMPTION_DISCOUNT_PERCENT,
+  PROFILE_PROMPT_AFTER_TRANSACTIONS,
+  SEGMENT_WINDOW_DAYS,
   STAMP_MINIMUM_TRANSACTION,
   STAMPS_PER_REDEMPTION,
   TRANSACTION_VOID_REASON_MAX_LENGTH,
   rupiah,
 } from "@/lib/business-rules";
 import { db } from "@/lib/db";
+import { getCustomerSegment } from "@/lib/segment-service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -35,7 +39,8 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
   const todayKey = jakartaDayKey(currentTime());
   const canVoid = staff.role === "OWNER" || staff.role === "MANAGER";
   const branches = await db.branch.findMany({ orderBy: { name: "asc" } });
-  const [customers, selected] = await Promise.all([
+  const staffBranch = branches.find(({ id }) => id === staff.branchId);
+  const [customers, selected, segmentTransactions] = await Promise.all([
     query
       ? db.customer.findMany({
           where: {
@@ -64,11 +69,28 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
               take: 3,
               include: { branch: true, voidRecord: { select: { voidedAt: true } } },
             },
+            wishlists: { where: { active: true }, select: { id: true } },
           },
         })
       : Promise.resolve(null),
+    customerId
+      ? db.transaction.findMany({
+          where: { customerId, voidRecord: null, createdAt: { gte: new Date(currentTime().getTime() - SEGMENT_WINDOW_DAYS * 86400000) } },
+          select: { createdAt: true },
+        })
+      : Promise.resolve([]),
   ]);
   const activeStamps = selected?.stamps.length ?? 0;
+  const nonVoidedTransactionCount = selected
+    ? await db.transaction.count({ where: { customerId: selected.id, voidRecord: null } })
+    : 0;
+  const profileIncomplete = selected && (!selected.favoriteCategory || !selected.favoriteSize || !selected.birthDate || !selected.instagram);
+  const segment = selected
+    ? getCustomerSegment({
+        transactionDates: segmentTransactions.map(({ createdAt }) => createdAt),
+        activeWishlistCount: selected.wishlists.length,
+      })
+    : null;
 
   return (
     <div className="page-content">
@@ -88,7 +110,10 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
             <div className="form-grid">
               <div className="field"><label htmlFor="customer-name">Nama pelanggan</label><input id="customer-name" name="name" required maxLength={100} placeholder="Contoh: Dinda Putri" /></div>
               <div className="field"><label htmlFor="customer-whatsapp">Nomor WhatsApp</label><input id="customer-whatsapp" name="whatsapp" required inputMode="tel" placeholder="08xx atau +62..." /></div>
-              <div className="field full"><label htmlFor="registration-branch">Cabang pendaftaran</label><select id="registration-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>
+              <div className="field"><label htmlFor="registration-channel">Asal pelanggan</label><select id="registration-channel" name="acquisitionChannel" defaultValue="DATANG_LANGSUNG">{Object.entries(ACQUISITION_CHANNELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div>
+              <div className="field full"><label htmlFor="registration-branch">Cabang pendaftaran</label>{staff.role === "OWNER"
+                ? <select id="registration-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+                : <><strong>{staffBranch?.name ?? "Cabang staf"}</strong><input type="hidden" name="branchId" value={staff.branchId ?? ""} /></>}</div>
             </div>
             <label className="checkbox-field"><input type="checkbox" name="marketingConsent" /> Pelanggan menyatakan setuju: “{MESSAGE_CONSENT_TEXT}”</label>
             <div className="form-actions"><button className="button" type="submit">Daftarkan pelanggan</button><Link className="button secondary" href="/kasir">Batal</Link></div>
@@ -105,10 +130,10 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
             </form>
             {query && <div className="customer-results">
               {customers.map((customer) => (
-                <Link className={`customer-result${customer.id === selected?.id ? " selected" : ""}`} href={`/kasir?customer=${encodeURIComponent(customer.id)}`} key={customer.id}>
-                  <span><strong>{customer.name}</strong><small>{customer.whatsapp} · Terdaftar di {customer.registeredAt.name}</small></span>
-                  <span aria-hidden="true">→</span>
-                </Link>
+                <div className={`customer-result${customer.id === selected?.id ? " selected" : ""}`} key={customer.id}>
+                  <span><Link href={`/pelanggan/${encodeURIComponent(customer.id)}`}><strong>{customer.name}</strong></Link><small>{customer.whatsapp} · Terdaftar di {customer.registeredAt.name}</small></span>
+                  <Link href={`/kasir?customer=${encodeURIComponent(customer.id)}`} aria-label={`Pilih ${customer.name}`}>Pilih →</Link>
+                </div>
               ))}
               {!customers.length && <div className="empty-state">Pelanggan tidak ditemukan. <Link href="/kasir?new=1">Daftarkan pelanggan baru</Link>.</div>}
               {customers.length === 10 && <p className="field-hint">Maksimal 10 hasil ditampilkan. Tambahkan kata kunci untuk mempersempit pencarian.</p>}
@@ -118,7 +143,13 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
           {selected ? (
             <section className="cashier-customer">
               <div className="panel cashier-profile">
-                <div className="panel-header"><div><h2 className="panel-title">{selected.name}</h2><p className="panel-subtitle">{selected.whatsapp} · Terdaftar di {selected.registeredAt.name}</p></div><Link className="inline-action" href="/kasir">Tutup ×</Link></div>
+                <div className="panel-header"><div><h2 className="panel-title">{selected.name}</h2><p className="panel-subtitle">{selected.whatsapp} · Terdaftar di {selected.registeredAt.name}</p><span className="tag">{segment}</span></div><Link className="inline-action" href="/kasir">Tutup ×</Link></div>
+                {!selected.marketingConsent && !selected.optedOut && <form action={recordCashierConsent} className="warning-callout section-spacer">
+                  <input type="hidden" name="customerId" value={selected.id} />
+                  <input type="hidden" name="consentText" value={MESSAGE_CONSENT_TEXT} />
+                  <label className="checkbox-field"><input type="checkbox" name="marketingConsent" required /> Pelanggan menyatakan setuju: “{MESSAGE_CONSENT_TEXT}”</label>
+                  <button className="button small" type="submit">Catat persetujuan</button>
+                </form>}
                 <div className="cashier-stamp">
                   <div className="progress-label"><strong>Stamp aktif</strong><span>{activeStamps}/{STAMPS_PER_REDEMPTION}</span></div>
                   <div className="progress-bar"><span style={{ width: `${Math.min(activeStamps / STAMPS_PER_REDEMPTION * 100, 100)}%` }} /></div>
@@ -164,12 +195,17 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
               <section className="form-card cashier-form">
                 <h2>Catat transaksi</h2>
                 <p>Minimum untuk mendapat stamp {rupiah(STAMP_MINIMUM_TRANSACTION)} · Maksimal satu stamp per hari per pelanggan.</p>
+                <p className="field-hint">Tawarkan stamp: {activeStamps}/{STAMPS_PER_REDEMPTION} stamp aktif</p>
+                {nonVoidedTransactionCount >= PROFILE_PROMPT_AFTER_TRANSACTIONS && profileIncomplete && <div className="warning-callout">Lengkapi profil pelanggan. <Link href={`/pelanggan/${encodeURIComponent(selected.id)}`}>Buka profil</Link></div>}
                 <form action={recordTransaction}>
                   <input type="hidden" name="customerId" value={selected.id} />
                   <div className="form-grid">
-                    <div className="field"><label htmlFor="transaction-branch">Cabang</label><select id="transaction-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>
-                    <div className="field"><label htmlFor="transaction-amount">Nominal sebelum diskon (Rp)</label><input id="transaction-amount" name="amount" type="number" min="1" step="1" required placeholder="150000" /></div>
+                    <div className="field"><label htmlFor="transaction-branch">Cabang</label>{staff.role === "OWNER"
+                      ? <select id="transaction-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+                      : <><strong>{staffBranch?.name ?? "Cabang staf"}</strong><input type="hidden" name="branchId" value={staff.branchId ?? ""} /></>}</div>
+                    <div className="field"><label htmlFor="transaction-amount">Nominal sebelum diskon (Rp)</label><input id="transaction-amount" name="amount" type="number" min="1" step="1" required placeholder="100000" /></div>
                   </div>
+                  <label className="checkbox-field"><input type="checkbox" name="stampOffered" defaultChecked /> Stamp sudah ditawarkan ke pelanggan</label>
                   <label className="checkbox-field"><input type="checkbox" name="useStampDiscount" defaultChecked /> Gunakan diskon stamp jika tersedia ({REDEMPTION_DISCOUNT_PERCENT}%)</label>
                   <div className="form-actions"><button className="button" type="submit">Simpan transaksi</button></div>
                 </form>

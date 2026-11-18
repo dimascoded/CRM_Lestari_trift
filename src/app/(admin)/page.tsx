@@ -1,119 +1,116 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
-import { currentTime, jakartaDayKey, rupiah } from "@/lib/business-rules";
-import { getKpis } from "@/lib/kpi";
-import { db } from "@/lib/db";
+import { DASHBOARD_DEFAULT_PERIOD_DAYS, DASHBOARD_PERIOD_DAYS, STOCK_COMPLIANCE_WINDOW_DAYS, jakartaDayKey, rupiah } from "@/lib/business-rules";
+import { getDashboardSummary } from "@/lib/dashboard-service";
 
-const rolloutLabels: Record<number, string> = { 1: "Pilot", 2: "Tahap 2", 3: "Tahap 3" };
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-export default function DashboardPage() {
-  return <DashboardContent />;
-}
+export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
+  const staff = await requireStaffPage(["OWNER", "MANAGER"]);
+  const params = await searchParams;
+  const periodValue = typeof params.period === "string" ? Number(params.period) : DASHBOARD_DEFAULT_PERIOD_DAYS;
+  const period = DASHBOARD_PERIOD_DAYS.includes(periodValue as (typeof DASHBOARD_PERIOD_DAYS)[number])
+    ? periodValue as (typeof DASHBOARD_PERIOD_DAYS)[number]
+    : DASHBOARD_DEFAULT_PERIOD_DAYS;
+  const branchId = staff.role === "OWNER"
+    ? typeof params.branch === "string" && params.branch ? params.branch : null
+    : staff.branchId;
+  const data = await getDashboardSummary({ periodDays: period, branchId });
+  const maxSales = Math.max(1, ...data.salesSeries.map(({ value }) => value));
+  const dateLabel = new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeZone: "Asia/Jakarta" });
+  const summary = [
+    ["Pelanggan aktif", data.summary.activeCustomers.toLocaleString("id-ID")],
+    ["Pelanggan baru", data.summary.newCustomers.toLocaleString("id-ID")],
+    ["Pendapatan bersih", rupiah(data.summary.netSales)],
+    ["Transaksi", data.summary.transactions.toLocaleString("id-ID")],
+    ["Rata-rata nilai transaksi", rupiah(data.summary.averageTransaction)],
+    ["Stamp diberikan", data.summary.stamps.toLocaleString("id-ID")],
+    ["Penukaran stamp", `${data.summary.redemptionCount} · diskon ${rupiah(data.summary.stampDiscounts)}`],
+    ["Pelanggan repeat", data.summary.repeatCustomers.toLocaleString("id-ID")],
+    ["Setuju pesan", `${data.summary.consentPercent.toLocaleString("id-ID", { maximumFractionDigits: 1 })}%`],
+  ];
+  const formatKpi = (value: number, unit: string) =>
+    `${unit === "kali" ? value.toFixed(2) : value.toLocaleString("id-ID", { maximumFractionDigits: 1 })}${unit === "%" ? "%" : ` ${unit}`}`;
 
-async function DashboardContent() {
-  await requireStaffPage(["OWNER", "MANAGER"]);
-  const now = currentTime();
-  const today = jakartaDayKey(now);
-  const [customers, stampsToday, availableStock, wishlistMatches, branches, transactions, kpis] = await Promise.all([
-    db.customer.count({ where: { active: true } }),
-    db.stamp.count({ where: { dayKey: today, voidedAt: null } }),
-    db.stockItem.count({ where: { status: "AVAILABLE" } }),
-    db.stockMatchNotification.count(),
-    db.branch.findMany({
-      orderBy: [{ rolloutStage: "asc" }, { name: "asc" }],
-      include: {
-        stockItems: { where: { status: "AVAILABLE" }, select: { id: true } },
-        stockUpdateLogs: { where: { type: "CHANGE" }, orderBy: { updatedAt: "desc" }, take: 1 },
-      },
-    }),
-    db.transaction.findMany({
-      where: { voidRecord: null },
-      take: 6,
-      orderBy: { createdAt: "desc" },
-      include: { customer: true, branch: true },
-    }),
-    getKpis(),
-  ]);
-  const currentDate = new Intl.DateTimeFormat("id-ID", {
-    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta",
-  }).format(now);
+  return <div className="page-content dashboard-page">
+    <PageHeader eyebrow={`CRM · ${jakartaDayKey()}`} title="Ringkasan CRM" description="Pantau pelanggan, penjualan, wishlist, stok, pesan, dan KPI dalam satu tampilan." />
+    <form className="dashboard-filter" method="get">
+      <label>Periode<select name="period" defaultValue={String(period)}>{DASHBOARD_PERIOD_DAYS.map((days) => <option value={days} key={days}>{days} hari</option>)}</select></label>
+      {staff.role === "OWNER" && <label>Cabang<select name="branch" defaultValue={branchId ?? ""}><option value="">Semua cabang</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
+      <button className="button secondary" type="submit">Terapkan filter</button>
+    </form>
 
-  return (
-    <div className="page-content">
-      <PageHeader
-        eyebrow={currentDate.toLocaleUpperCase("id-ID")}
-        title="Ringkasan Lestari Thrift"
-        description="Pantau sasaran BDN, roll-out cabang, pelanggan, dan transaksi terbaru."
-        action={<span className="date-pill">Hari ini · {currentDate}</span>}
-      />
-      <div className="stats-grid">
-        <StatCard label="Total pelanggan" value={customers.toLocaleString("id-ID")} note="Database terpusat" icon="◉" />
-        <StatCard label="Stamp hari ini" value={stampsToday.toLocaleString("id-ID")} note="Di seluruh cabang" icon="✳" />
-        <StatCard label="Stok tersedia" value={availableStock.toLocaleString("id-ID")} note="Lintas cabang" icon="▦" />
-        <StatCard label="Notifikasi wishlist" value={wishlistMatches.toLocaleString("id-ID")} note="Simulasi tersimpan" icon="♡" />
+    <section className="dashboard-section" id="ringkasan"><div className="dashboard-section-heading"><h2>Ringkasan</h2></div>
+      <div className="compact-stats">{summary.map(([label, value]) => <div className="compact-stat" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+      {!data.summary.transactions && !data.summary.activeCustomers && <p className="empty-state">Belum ada data pada periode ini.</p>}
+    </section>
+
+    <section className="dashboard-section" id="penjualan"><div className="dashboard-section-heading"><h2>Penjualan</h2><Link href="/laporan?tab=performa">Laporan performa ↗</Link></div>
+      {!data.salesSeries.length ? <p className="empty-state">Belum ada data pada periode ini.</p> : <>
+        <div className="sales-bars" aria-label="Grafik pendapatan bersih">{data.salesSeries.map(({ key, value }) =>
+          <div className="sales-bar-item" key={key} title={`${key}: ${rupiah(value)}`}><span className="sales-bar" style={{ height: `${Math.max(3, value / maxSales * 100)}%` }} /><small>{key.slice(5)}</small></div>,
+        )}</div>
+        <div className="table-scroll"><table><thead><tr><th>CABANG</th><th>PENDAPATAN BERSIH</th><th>TRANSAKSI</th><th>STAMP</th></tr></thead><tbody>
+          {data.branches.map((branch) => { const row = data.salesByBranch.find((item) => item.branchId === branch.id); return <tr key={branch.id}><td>{branch.name}</td><td>{rupiah(row?.netSales ?? 0)}</td><td>{row?.transactions ?? 0}</td><td>{row?.stamps ?? 0}</td></tr>; })}
+          {!data.branches.length && <tr><td className="table-empty" colSpan={4}>Belum ada data pada periode ini.</td></tr>}
+        </tbody></table></div>
+      </>}
+    </section>
+
+    <section className="dashboard-section" id="pelanggan"><div className="dashboard-section-heading"><h2>Pelanggan</h2><Link href="/pelanggan">Database pelanggan ↗</Link></div>
+      <div className="dashboard-two-column">
+        <div><h3>Komposisi segmen</h3>{Object.entries(data.customersBySegment).map(([label, count]) => <div className="dashboard-line" key={label}><span>{label}</span><strong>{count}</strong></div>)}</div>
+        <div><h3>Saluran akuisisi</h3>{data.customersByChannel.map(({ label, count }) => <div className="dashboard-line" key={label}><span>{label}</span><strong>{count}</strong></div>)}{!data.customersByChannel.length && <p className="empty-state">Belum ada data pada periode ini.</p>}</div>
       </div>
+      <p className="dashboard-note">Persetujuan pesan aktif: {data.summary.consentPercent.toLocaleString("id-ID", { maximumFractionDigits: 1 })}% dari pelanggan aktif.</p>
+    </section>
 
-      <section className="table-card section-spacer">
-        <div className="table-titlebar"><div><h2>Indikator target BDN</h2><p>Capaian simulasi dari data demo lokal dibanding baseline dan sasaran.</p></div></div>
-        <div className="table-scroll">
-          <table><thead><tr><th>KODE</th><th>INDIKATOR</th><th>BASELINE</th><th>TARGET</th><th>CAPAIAN</th><th>STATUS</th></tr></thead>
-            <tbody>{kpis.map((kpi) => (
-              <tr key={kpi.code}>
-                <td><strong>{kpi.code}</strong></td>
-                <td>{kpi.label}{kpi.duplicateAttempts !== undefined && <small className="table-subtext">{kpi.duplicateAttempts.toLocaleString("id-ID")} percobaan ganda tercegah</small>}</td>
-                <td>{kpi.baseline === null ? "—" : formatKpi(kpi.baseline, kpi.unit)}</td>
-                <td>{formatKpi(kpi.target, kpi.unit)}</td>
-                <td><strong>{formatKpi(kpi.value, kpi.unit)}</strong></td>
-                <td><span className={`status ${kpi.status === "Tercapai" ? "" : kpi.status === "Berjalan" ? "warning" : "neutral"}`}>{kpi.status}</span></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+    <section className="dashboard-section" id="wishlist"><div className="dashboard-section-heading"><h2>Wishlist</h2><Link href="/pesan?tab=notifikasi">Pesan & notifikasi ↗</Link></div>
+      <p className="dashboard-note">Wishlist aktif: {data.wishlist.activeCount} · Notifikasi simulasi periode ini: {data.wishlist.notifications} · Antrean belum diproses: {data.wishlist.followups}</p>
+      <div className="dashboard-two-column">
+        <ComparisonTable title="5 kategori paling dicari" rows={data.wishlist.categories} />
+        <ComparisonTable title="5 ukuran paling dicari" rows={data.wishlist.sizes} />
+      </div>
+      {!data.wishlist.activeCount && <p className="empty-state">Belum ada data pada periode ini.</p>}
+    </section>
+
+    <section className="dashboard-section" id="stok"><div className="dashboard-section-heading"><h2>Stok</h2><Link href="/stok">Kelola stok ↗</Link></div>
+      <div className="compact-stats"><div className="compact-stat"><span>Barang tersedia</span><strong>{data.stock.available}</strong></div><div className="compact-stat"><span>Stok mati</span><strong>{data.stock.dead}</strong></div></div>
+      <h3>Kepatuhan update stok · {STOCK_COMPLIANCE_WINDOW_DAYS} hari</h3><div className="table-scroll"><table><thead><tr><th>CABANG</th><th>HARI TERPENUHI</th><th>KEPATUHAN</th></tr></thead><tbody>
+        {data.stock.compliance.map((row) => <tr key={row.branchId}><td>{row.branchName}</td><td>{row.days}/{STOCK_COMPLIANCE_WINDOW_DAYS}</td><td>{Math.round(row.days / STOCK_COMPLIANCE_WINDOW_DAYS * 100)}%</td></tr>)}
+        {!data.stock.compliance.length && <tr><td className="table-empty" colSpan={3}>Belum ada data pada periode ini.</td></tr>}
+      </tbody></table></div>
+      {!data.stock.available && !data.stock.dead && <p className="empty-state">Belum ada data pada periode ini.</p>}
+    </section>
+
+    <section className="dashboard-section" id="pesan"><div className="dashboard-section-heading"><h2>Pesan</h2><Link href="/pesan?tab=antrean">Buka antrean tindak lanjut ↗</Link></div>
+      <div className="compact-stats"><div className="compact-stat"><span>Reminder simulasi</span><strong>{data.messages.reminderCount}</strong></div><div className="compact-stat"><span>Konversi 7 hari</span><strong>{data.messages.conversionPercent.toLocaleString("id-ID", { maximumFractionDigits: 1 })}%</strong></div><div className="compact-stat"><span>Total antrean tindak lanjut</span><strong>{data.messages.followups}</strong></div></div>
+      {!data.messages.reminderCount && !data.messages.followups && <p className="empty-state">Belum ada data pada periode ini.</p>}
+    </section>
+
+    <section className="dashboard-section" id="kpi"><div className="dashboard-section-heading"><h2>KPI BDN</h2><Link href="/laporan">Laporan lengkap ↗</Link></div>
+      <div className="table-scroll"><table><thead><tr><th>KODE</th><th>INDIKATOR</th><th>BASELINE</th><th>TARGET</th><th>CAPAIAN</th><th>STATUS</th></tr></thead><tbody>
+        {data.kpis.map((kpi) => <tr key={kpi.code}><td><strong>{kpi.code}</strong></td><td>{kpi.label}</td><td>{kpi.baseline === null ? "—" : formatKpi(kpi.baseline, kpi.unit)}</td><td>{formatKpi(kpi.target, kpi.unit)}</td><td>{formatKpi(kpi.value, kpi.unit)}</td><td><span className={`status ${kpi.status === "Tercapai" ? "" : kpi.status === "Berjalan" ? "warning" : "neutral"}`}>{kpi.status}</span>{kpi.code === "S2" && !!kpi.missingQaBranches?.length && <small className="table-subtext">Belum diuji: {kpi.missingQaBranches.join(", ")}</small>}</td></tr>)}
+      </tbody></table></div>
+    </section>
+
+    <div className="dashboard-two-column dashboard-bottom">
+      <section className="dashboard-section"><div className="dashboard-section-heading"><h2>Tahap roll-out</h2><Link href="/strategi">Strategi CRM ↗</Link></div>
+        {data.branches.map((branch) => <div className="dashboard-line" key={branch.id}><span>{branch.name}</span><strong>Tahap {branch.rolloutStage}</strong></div>)}
+        {!data.branches.length && <p className="empty-state">Belum ada data pada periode ini.</p>}
       </section>
-
-      <div className="dashboard-grid section-spacer">
-        <section className="panel">
-          <div className="panel-header"><div><h2 className="panel-title">Tahap roll-out</h2><p className="panel-subtitle">Progres penerapan per cabang</p></div><Link className="panel-link" href="/manajemen?tab=stok">Kepatuhan stok ↗</Link></div>
-          <div className="branch-list">
-            {branches.map((branch) => {
-              const lastUpdate = branch.stockUpdateLogs[0]?.updatedAt;
-              return (
-                <div className="branch-row rollout-row" key={branch.id}>
-                  <div className="branch-name"><span className="branch-avatar">{branch.name.slice(0, 2).toUpperCase()}</span>{branch.name}</div>
-                  <div><strong>{rolloutLabels[branch.rolloutStage] ?? `Tahap ${branch.rolloutStage}`}</strong><small className="table-subtext">{branch.stockItems.length} barang tersedia</small></div>
-                  <div className="branch-update">{lastUpdate ? new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(lastUpdate) : "Belum update"}</div>
-                  <span className={`status ${lastUpdate && jakartaDayKey(lastUpdate) === today ? "" : "warning"}`}>{lastUpdate && jakartaDayKey(lastUpdate) === today ? "Diperbarui" : "Perlu update"}</span>
-                </div>
-              );
-            })}
-            {!branches.length && <div className="empty-state">Belum ada cabang.</div>}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header"><div><h2 className="panel-title">Aktivitas transaksi</h2><p className="panel-subtitle">Catatan terbaru lintas cabang</p></div><Link className="panel-link" href="/kasir">Buka kasir ↗</Link></div>
-          <div className="activity-list">
-            {transactions.map((transaction) => (
-              <div className="activity-row" key={transaction.id}>
-                <span className="activity-dot" />
-                <div className="activity-body"><strong>{transaction.customer.name}</strong><small>{transaction.branch.name} · {new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(transaction.createdAt)}</small></div>
-                <span className="activity-amount">{rupiah(transaction.amount - transaction.discountAmount)}</span>
-              </div>
-            ))}
-            {!transactions.length && <div className="empty-state">Belum ada transaksi.</div>}
-          </div>
-        </section>
-      </div>
+      <section className="dashboard-section"><div className="dashboard-section-heading"><h2>Transaksi terbaru</h2><Link href="/kasir">Kasir ↗</Link></div>
+        {data.latestTransactions.map((transaction) => <div className="dashboard-line" key={transaction.id}><span><strong>{transaction.customer.name}</strong><small>{transaction.branch.name} · {dateLabel.format(transaction.createdAt)}</small></span><strong>{rupiah(transaction.amount - transaction.discountAmount)}</strong></div>)}
+        {!data.latestTransactions.length && <p className="empty-state">Belum ada data pada periode ini.</p>}
+      </section>
     </div>
-  );
+  </div>;
 }
-
-function formatKpi(value: number, unit: string) {
-  const formatted = unit === "kali" ? value.toFixed(2) : value.toLocaleString("id-ID", { maximumFractionDigits: 1 });
-  return `${formatted}${unit === "%" ? "%" : ` ${unit}`}`;
-}
-
-function StatCard({ label, value, note, icon }: { label: string; value: string; note: string; icon: string }) {
-  return <div className="stat-card"><div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div><div className="stat-number">{value}</div><div className="stat-foot"><span>{note}</span></div></div>;
+function ComparisonTable({ title, rows }: { title: string; rows: { label: string; wishlists: number; availableStock: number }[] }) {
+  const max = Math.max(1, ...rows.flatMap(({ wishlists, availableStock }) => [wishlists, availableStock]));
+  return <div><h3>{title}</h3>{rows.length ? <div className="dashboard-comparison">{rows.map((row) => <div className="comparison-row" key={row.label}>
+    <strong>{row.label}</strong><span>Wishlist aktif: {row.wishlists}</span><div className="comparison-track"><i style={{ width: `${row.wishlists / max * 100}%` }} /></div>
+    <span>Stok tersedia: {row.availableStock}</span><div className="comparison-track stock"><i style={{ width: `${row.availableStock / max * 100}%` }} /></div>
+  </div>)}</div> : <p className="empty-state">Belum ada data pada periode ini.</p>}</div>;
 }

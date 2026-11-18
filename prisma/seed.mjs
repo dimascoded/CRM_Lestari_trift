@@ -1,4 +1,9 @@
 import { PrismaClient } from "@prisma/client";
+import {
+  MESSAGE_CONSENT_POLICY_VERSION,
+  MESSAGE_CONSENT_TEXT,
+  STAMP_MINIMUM_TRANSACTION,
+} from "../src/lib/business-rules.ts";
 
 const db = new PrismaClient();
 const day = (offset) => {
@@ -45,7 +50,7 @@ async function main() {
 
   const kpiTargets = [
     { code: "S1", label: "Akun pelanggan ganda", unit: "%", baseline: 8, target: 2 },
-    { code: "S2", label: "Cabang dengan penukaran stamp berhasil", unit: "%", baseline: 0, target: 100 },
+    { code: "S2", label: "Uji tukar stamp berhasil per cabang", unit: "%", baseline: 0, target: 100 },
     { code: "S3", label: "Pelanggan beli lebih dari sekali per bulan", unit: "orang", baseline: 40, target: 50 },
     { code: "S4", label: "Kepatuhan update stok harian", unit: "%", baseline: 50, target: 90 },
     { code: "S5", label: "Stok mati", unit: "barang", baseline: 25, target: 20 },
@@ -58,42 +63,52 @@ async function main() {
     await db.kpiTarget.upsert({ where: { code }, update: data, create: { code, ...data } });
   }
 
-  if ((await db.user.count()) === 0) {
-    await db.user.createMany({
-      data: [
-        { name: "Nadia Anggraini", role: "MANAGER", branchId: yogyakarta.id },
-        { name: "Ayu Puspita", role: "CASHIER", branchId: semarang.id },
-        { name: "Rafi Pratama", role: "STOCK_STAFF", branchId: magelang.id },
-        { name: "Dewi Lestari", role: "MARKETING", branchId: yogyakarta.id },
-        { name: "Pemilik Lestari", role: "OWNER", branchId: null },
-      ],
-    });
-  }
-
   const customerRows = [
-    { name: "Dinda Putri", whatsapp: "+6281234567801", registeredAtId: yogyakarta.id, favoriteCategory: "Atasan", favoriteSize: "M", instagram: "@dindaputri" },
-    { name: "Sarah Amelia", whatsapp: "+6281234567802", registeredAtId: semarang.id, favoriteCategory: "Dress", favoriteSize: "S" },
-    { name: "Rani Maharani", whatsapp: "+6281234567803", registeredAtId: magelang.id, optedOut: true },
-    { name: "Nabila Zahra", whatsapp: "+6281234567804", registeredAtId: bali.id },
-    { name: "Putri Wulandari", whatsapp: "+6281234567805", registeredAtId: yogyakarta.id },
+    { name: "Dinda Putri", whatsapp: "+6281234567801", registeredAtId: yogyakarta.id, favoriteCategory: "Atasan", favoriteSize: "M", instagram: "@dindaputri", acquisitionChannel: "INSTAGRAM", marketingConsent: true, optedOut: false },
+    { name: "Sarah Amelia", whatsapp: "+6281234567802", registeredAtId: semarang.id, favoriteCategory: "Dress", favoriteSize: "S", acquisitionChannel: "TIKTOK", marketingConsent: true, optedOut: false },
+    { name: "Rani Maharani", whatsapp: "+6281234567803", registeredAtId: magelang.id, optedOut: true, acquisitionChannel: "DATANG_LANGSUNG", marketingConsent: false },
+    { name: "Nabila Zahra", whatsapp: "+6281234567804", registeredAtId: bali.id, acquisitionChannel: "WHATSAPP", marketingConsent: true, optedOut: false },
+    { name: "Putri Wulandari", whatsapp: "+6281234567805", registeredAtId: yogyakarta.id, acquisitionChannel: "TEMAN", marketingConsent: false, optedOut: false },
+    { name: "Laras Puspita", whatsapp: "+6281234567806", registeredAtId: semarang.id, acquisitionChannel: "INSTAGRAM", marketingConsent: true, optedOut: false },
   ];
   const customers = await Promise.all(
     customerRows.map(({ whatsapp, ...data }) =>
-      db.customer.upsert({ where: { whatsapp }, update: {}, create: { ...data, whatsapp } }),
+      db.customer.upsert({ where: { whatsapp }, update: data, create: { ...data, whatsapp } }),
     ),
   );
-  const [dinda, sarah, rani, nabila, putri] = customers;
+  const [dinda, sarah, rani, nabila, putri, laras] = customers;
+  for (const customer of customers) {
+    if (!customer.marketingConsent || customer.optedOut) continue;
+    const existingConsent = await db.messageConsent.findFirst({ where: { customerId: customer.id, source: "SEED_DEMO" } });
+    if (!existingConsent) {
+      await db.messageConsent.create({
+        data: {
+          customerId: customer.id,
+          status: "GRANTED",
+          source: "SEED_DEMO",
+          policyVersion: MESSAGE_CONSENT_POLICY_VERSION,
+          consentText: MESSAGE_CONSENT_TEXT,
+        },
+      });
+    }
+  }
 
   if ((await db.transaction.count()) === 0) {
     const earningPlans = [
-      { customer: dinda, branch: yogyakarta, amount: 185000, age: 2 },
-      { customer: dinda, branch: semarang, amount: 240000, age: 5 },
-      { customer: dinda, branch: magelang, amount: 125000, age: 9 },
-      { customer: sarah, branch: semarang, amount: 90000, age: 1 },
-      { customer: sarah, branch: bali, amount: 150000, age: 12 },
-      { customer: rani, branch: magelang, amount: 220000, age: 3 },
-      { customer: nabila, branch: bali, amount: 310000, age: 0 },
-      { customer: putri, branch: yogyakarta, amount: 175000, age: 0 },
+      { customer: dinda, branch: yogyakarta, amount: 185000, age: 10 },
+      { customer: dinda, branch: semarang, amount: 240000, age: 7 },
+      { customer: dinda, branch: magelang, amount: 125000, age: 4 },
+      { customer: sarah, branch: semarang, amount: 90000, age: 10 },
+      { customer: sarah, branch: bali, amount: 125000, age: 7 },
+      { customer: sarah, branch: bali, amount: 125000, age: 4 },
+      { customer: rani, branch: magelang, amount: 220000, age: 90 },
+      { customer: nabila, branch: bali, amount: 310000, age: 85 },
+      { customer: putri, branch: yogyakarta, amount: 175000, age: 10 },
+      { customer: putri, branch: semarang, amount: 120000, age: 7 },
+      { customer: putri, branch: bali, amount: 90000, age: 4 },
+      { customer: laras, branch: semarang, amount: 180000, age: 10 },
+      { customer: laras, branch: bali, amount: 135000, age: 7 },
+      { customer: laras, branch: semarang, amount: 110000, age: 4 },
     ];
     for (const plan of earningPlans) {
       const createdAt = day(plan.age);
@@ -105,7 +120,7 @@ async function main() {
           createdAt,
         },
       });
-      if (plan.customer.id === dinda.id || (plan.customer.id === sarah.id && plan.amount >= 150000)) {
+      if (plan.customer.id === dinda.id || plan.customer.id === laras.id || ((plan.customer.id === sarah.id || plan.customer.id === putri.id) && plan.amount >= STAMP_MINIMUM_TRANSACTION)) {
         await db.stamp.create({
           data: {
             customerId: plan.customer.id,
@@ -166,12 +181,12 @@ async function main() {
     });
   }
 
-  const dindaLinen = await db.stockItem.findFirst({
-    where: { name: "Kemeja linen vintage", branchId: yogyakarta.id },
+  const sarahVintageDress = await db.stockItem.findFirst({
+    where: { name: "Dress midi vintage", branchId: magelang.id },
   });
-  if (dindaLinen && (await db.stockMatchNotification.count()) === 0) {
+  if (sarahVintageDress && (await db.stockMatchNotification.count()) === 0) {
     await db.stockMatchNotification.create({
-      data: { customerId: dinda.id, stockItemId: dindaLinen.id, sentAt: day(1) },
+      data: { customerId: sarah.id, stockItemId: sarahVintageDress.id, sentAt: day(1) },
     });
   }
 

@@ -7,6 +7,7 @@ import { StockCatalog } from "@/components/StockCatalog";
 import { getCustomerSession } from "@/lib/auth";
 import { MESSAGE_CONSENT_TEXT, REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
 import { db } from "@/lib/db";
+import { featureEnabledForBranch } from "@/lib/rollout";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const portalTabs = [
@@ -36,6 +37,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
     ? await db.customer.findUnique({
         where: { id: customerSession.customer.id },
         include: {
+          registeredAt: { select: { rolloutStage: true } },
           stamps: { orderBy: { createdAt: "desc" }, include: { branch: true } },
           transactions: {
             orderBy: { createdAt: "desc" },
@@ -88,6 +90,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
   const hasDiscount = activeStamps.length >= STAMPS_PER_REDEMPTION;
   const progress = activeStamps.length % STAMPS_PER_REDEMPTION;
   const editingWishlist = customer.wishlists.find(({ id }) => id === requestedEditWishlist);
+  const wishlistEnabled = featureEnabledForBranch("wishlist", customer.registeredAt);
 
   return (
     <div className="page-content">
@@ -142,8 +145,9 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
       {tab === "wishlist" && (
         <section className="form-card portal-section">
           <h2>{editingWishlist ? "Ubah wishlist" : "Wishlist"}</h2><p>{editingWishlist ? "Perbarui kriteria; riwayat notifikasi yang sudah tercatat tetap disimpan." : "Tambahkan kategori, ukuran, atau kata kunci yang sedang dicari."}</p>
+          {!wishlistEnabled && <div className="warning-callout">Fitur belum aktif di tahap roll-out cabang ini.</div>}
           {requestedEditWishlist && !editingWishlist && <Notice status="invalid-wishlist-id" />}
-          <form action={editingWishlist ? updateWishlist : createWishlist}>
+          {wishlistEnabled && <form action={editingWishlist ? updateWishlist : createWishlist}>
             {editingWishlist && <input type="hidden" name="wishlistId" value={editingWishlist.id} />}
             <div className="form-grid">
               <div className="field"><label htmlFor="wishlist-category">Kategori</label><select id="wishlist-category" name="category" defaultValue={editingWishlist?.category ?? ""}><option value="">Semua kategori</option>{STOCK_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></div>
@@ -154,7 +158,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
               <button className="button" type="submit">{editingWishlist ? "Simpan perubahan" : "＋ Tambah wishlist"}</button>
               {editingWishlist && <Link className="button secondary" href="/portal?tab=wishlist">Batal</Link>}
             </div>
-          </form>
+          </form>}
           <div className="wishlist-list section-spacer">
             {customer.wishlists.map((item) => <div className="template-card" key={item.id}>
               <div className="template-top"><strong>{[item.category, item.size, item.keyword].filter(Boolean).join(" · ") || "Semua barang"}</strong><span className={`status ${item.active ? "" : "neutral"}`}>{item.active ? "Aktif" : "Nonaktif"}</span></div>

@@ -6,8 +6,13 @@ import {
   REMINDER_GRACE_DAYS,
   REMINDER_HISTORY_SIZE,
   REMINDER_LEAD_DAYS,
+  REMINDER_SEND_HOUR_JAKARTA,
+  SEGMENT_WINDOW_DAYS,
+  SEGMENTS,
 } from "./business-rules";
 import { SIMULATED_SENT_STATUS } from "./message-status";
+import { getCustomerSegment } from "./segment-service";
+import { reminderEnabled } from "./rollout";
 
 type ReminderCustomer = Customer & { transactions: Pick<Transaction, "createdAt">[] };
 
@@ -15,7 +20,7 @@ function renderMessage(message: string, customer: Customer) {
   return message.replaceAll("{nama}", customer.name.trim().split(/\s+/)[0] ?? customer.name);
 }
 
-function personalSchedule(transactions: Pick<Transaction, "createdAt">[], now: Date) {
+export function personalSchedule(transactions: Pick<Transaction, "createdAt">[], now: Date) {
   if (transactions.length < 3) return null;
   const chronological = [...transactions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const gaps = chronological.slice(1).map((transaction, index) =>
@@ -23,10 +28,22 @@ function personalSchedule(transactions: Pick<Transaction, "createdAt">[], now: D
   );
   const averageGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
   const expected = new Date(chronological[chronological.length - 1].createdAt.getTime() + averageGap * 86400000);
-  const earliest = new Date(expected.getTime() - REMINDER_LEAD_DAYS * 86400000);
   const latest = new Date(expected.getTime() + REMINDER_GRACE_DAYS * 86400000);
-  if (now < earliest || now > latest) return null;
-  return new Date(expected.getTime() - REMINDER_LEAD_DAYS * 86400000);
+  const expectedDay = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(expected);
+  const parts = Object.fromEntries(expectedDay.map(({ type, value }) => [type, value]));
+  const scheduledFor = new Date(Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day) - REMINDER_LEAD_DAYS,
+    REMINDER_SEND_HOUR_JAKARTA - 7,
+  ));
+  if (now < scheduledFor || now > latest) return null;
+  return scheduledFor;
 }
 
 async function customersForTemplate(template: ReminderTemplate, now: Date) {
@@ -40,10 +57,11 @@ async function customersForTemplate(template: ReminderTemplate, now: Date) {
     ...(template.segment === "NEW" ? { transactions: { none: { voidRecord: null } } } : {}),
   };
   if (template.segment !== "PERSONAL") {
-    return db.customer.findMany({
+    const customers = await db.customer.findMany({
       where,
       orderBy: { createdAt: "asc" },
     });
+    return filterTargetSegment(customers, template.targetSegment, now);
   }
 
   const customers = await db.customer.findMany({
@@ -57,10 +75,38 @@ async function customersForTemplate(template: ReminderTemplate, now: Date) {
       },
     },
   }) as ReminderCustomer[];
-  return customers.filter((customer) => personalSchedule(customer.transactions, now) !== null);
+  return filterTargetSegment(
+    customers.filter((customer) => personalSchedule(customer.transactions, now) !== null),
+    template.targetSegment,
+    now,
+  );
+}
+
+async function filterTargetSegment<T extends Customer>(customers: T[], targetSegment: string | null, now: Date) {
+  if (!targetSegment) return customers;
+  const cutoff = daysBefore(SEGMENT_WINDOW_DAYS, now);
+  const details = await db.customer.findMany({
+    where: { id: { in: customers.map(({ id }) => id) } },
+    select: {
+      id: true,
+      transactions: { where: { voidRecord: null, createdAt: { gte: cutoff, lte: now } }, select: { createdAt: true } },
+      wishlists: { where: { active: true }, select: { id: true } },
+    },
+  });
+  const byId = new Map(details.map((customer) => [
+    customer.id,
+    getCustomerSegment({
+      transactionDates: customer.transactions.map(({ createdAt }) => createdAt),
+      activeWishlistCount: customer.wishlists.length,
+      now,
+    }),
+  ]));
+  if (!(Object.values(SEGMENTS) as string[]).includes(targetSegment)) return [];
+  return customers.filter(({ id }) => byId.get(id) === targetSegment);
 }
 
 export async function processDueReminders(templateId?: string, now = new Date()) {
+  if (!(await reminderEnabled())) return 0;
   const templates = await db.reminderTemplate.findMany({
     where: { active: true, ...(templateId ? { id: templateId } : {}) },
   });

@@ -138,7 +138,7 @@ Prompt di bawah merujuk ke nilai ini. Semuanya ada di `src/lib/business-rules.ts
 
 | Aturan | Nilai |
 | --- | --- |
-| Minimum transaksi untuk stamp | Rp150.000 |
+| Minimum transaksi untuk stamp | Rp100.000 |
 | Stamp per pelanggan per hari | 1 (hari = zona Asia/Jakarta) |
 | Stamp untuk 1 penukaran | 3 (yang tertua dulu) |
 | Diskon penukaran | 10%, dibulatkan ke bawah |
@@ -194,7 +194,7 @@ Bangun autentikasi staf.
   requireBranchAccess(user, branchId). OWNER boleh semua cabang. Peran lain
   hanya cabangnya.
 - Halaman awal per peran: CASHIER /kasir, STOCK_STAFF /stok,
-  MARKETING /manajemen, MANAGER dan OWNER /.
+  MARKETING /laporan, MANAGER dan OWNER /.
 - Pesan gagal login sama untuk semua sebab (email salah, password salah,
   akun nonaktif). Tujuannya agar penyerang tidak bisa menebak email.
 - Skrip scripts/create-user.mjs: interaktif saja. Password tersembunyi dan
@@ -323,7 +323,7 @@ Bangun wishlist dan pencocokan stok di src/lib/wishlist-match.ts.
   (nama depan), {barang}, {ukuran}, {cabang}.
 - Simpan sebagai catatan simulasi dengan status SIMULATED_SENT. Tidak ada
   pesan yang dikirim.
-- Halaman /notifikasi: semua peran staf boleh melihat log dan mengubah
+- Tab `/pesan?tab=notifikasi`: semua peran staf boleh melihat log dan mengubah
   template. Perubahan template hanya berlaku untuk notifikasi berikutnya.
 
 Selesai jika: tes membuktikan wishlist yang dibuat SETELAH stok masuk tetap
@@ -390,7 +390,7 @@ menerima pesan simulasi, dan riwayatnya tetap utuh setelah dipulihkan.
 ### Prompt 10: Dashboard dan KPI
 
 ```text
-Bangun dasbor di / dan tab laporan di /manajemen (Reminder, Performa, Stok,
+Bangun dasbor di / dan tab laporan di /laporan (Reminder, Performa, Stok,
 Duplikat). Hitung KPI di src/lib/kpi.ts. Target dan baseline dibaca dari
 tabel KpiTarget. Jika jumlah target bukan 8, lempar error yang jelas.
 

@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import { after, test } from "node:test";
 import fs from "node:fs";
 import path from "node:path";
+import { EventEmitter } from "node:events";
 import { fileURLToPath } from "node:url";
+import { askHidden } from "../scripts/hidden-input.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const databaseUrl = "file:./prisma/regression-test.db";
@@ -21,7 +23,7 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders }, { confirmStockTodayRecord }, { getKpis }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT, ACQUISITION_CHANNELS, SEGMENTS }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent, recordCashierConsentRecord }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders, personalSchedule }, { confirmStockTodayRecord }, { getKpis }, { getCustomerSegment }, { featureEnabledForBranch, reminderEnabled, setBranchRolloutStageRecord }, { FOLLOWUP_QUEUES, getFollowUpQueues, markFollowedUpRecord }, { getDashboardSummary }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
   import("../src/lib/password.ts"),
@@ -33,7 +35,12 @@ const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLIC
   import("../src/lib/reminders.ts"),
   import("../src/lib/stock-service.ts"),
   import("../src/lib/kpi.ts"),
+  import("../src/lib/segment-service.ts"),
+  import("../src/lib/rollout.ts"),
+  import("../src/lib/followup-service.ts"),
+  import("../src/lib/dashboard-service.ts"),
 ]);
+process.env.ROLLOUT_GATING = "off";
 
 const branches = await Promise.all([
   db.branch.create({ data: { name: "Yogyakarta", rolloutStage: 1 } }),
@@ -97,6 +104,36 @@ test("user provisioning refuses non-interactive execution without creating an ac
   assert.equal(result.status, 1);
   assert.match(result.stderr, /interactive terminal/);
   assert.equal(await db.user.count(), before);
+});
+
+test("hidden password input ignores a split CRLF between prompts", async () => {
+  class TestInput extends EventEmitter {
+    isRaw = false;
+
+    setRawMode(value) {
+      this.isRaw = value;
+    }
+
+    resume() {}
+
+    pause() {}
+
+    send(value) {
+      this.emit("data", Buffer.from(value));
+    }
+  }
+
+  const input = new TestInput();
+  const output = { write() {} };
+  const passwordPromise = askHidden("Password: ", input, output);
+  input.send("correct-horse-battery\r");
+  assert.equal(await passwordPromise, "correct-horse-battery");
+
+  const confirmationPromise = askHidden("Ulangi password: ", input, output);
+  input.send("\n");
+  input.send("correct-horse-battery\r");
+  assert.equal(await confirmationPromise, "correct-horse-battery");
+  assert.equal(input.isRaw, false);
 });
 
 test("staff login blocks attempts by email and IP, then allows login after the window", async () => {
@@ -181,7 +218,7 @@ async function customer(name, optedOut = false, marketingConsent = true) {
 async function addHistory(customerId, count, ages, branchId = branches[0].id) {
   for (const age of ages.slice(0, count)) {
     const createdAt = new Date(Date.now() - age * 86400000);
-    const transaction = await db.transaction.create({ data: { customerId, branchId, amount: 150000, createdAt } });
+    const transaction = await db.transaction.create({ data: { customerId, branchId, amount: STAMP_MINIMUM_TRANSACTION, createdAt } });
     await db.stamp.create({
       data: {
         customerId,
@@ -220,7 +257,7 @@ test("archived customers keep history but cannot transact or receive simulated m
   const transaction = await recordTransactionRecord({
     customerId: buyer.id,
     branchId: branches[0].id,
-    amount: 150000,
+    amount: STAMP_MINIMUM_TRANSACTION,
     useStampDiscount: false,
   });
   assert.equal(transaction, null);
@@ -252,6 +289,53 @@ test("customer messaging consent is explicitly recorded at registration", async 
   assert.equal(declineLog?.status, "DECLINED");
 });
 
+test("customer acquisition channel is persisted and invalid channels are rejected", async () => {
+  assert.ok(Object.hasOwn(ACQUISITION_CHANNELS, "INSTAGRAM"));
+  const registered = await registerCustomerRecord("Kanal Instagram", "+628123459101", branches[0].id, false, null, "INSTAGRAM");
+  assert.equal(registered.duplicate, false);
+  assert.equal(registered.customer.acquisitionChannel, "INSTAGRAM");
+  const direct = await registerCustomerRecord("Kanal Langsung", "+628123459102", branches[0].id);
+  assert.equal(direct.duplicate, false);
+  assert.equal(direct.customer.acquisitionChannel, "DATANG_LANGSUNG");
+  await assert.rejects(
+    () => registerCustomerRecord("Kanal Tidak Valid", "+628123459103", branches[0].id, false, null, "UNKNOWN"),
+    /Invalid customer acquisition channel/,
+  );
+  assert.equal(await db.customer.count({ where: { whatsapp: "+628123459103" } }), 0);
+});
+
+test("customer segment priority is routine, collector, then new or seasonal", async () => {
+  const now = new Date("2026-11-18T10:00:00+07:00");
+  assert.equal(getCustomerSegment({
+    transactionDates: [1, 10, 20].map((days) => new Date(now.getTime() - days * 86400000)),
+    activeWishlistCount: 1,
+    now,
+  }), SEGMENTS.RUTIN);
+  assert.equal(getCustomerSegment({ transactionDates: [], activeWishlistCount: 1, now }), SEGMENTS.KOLEKTOR);
+  assert.equal(getCustomerSegment({ transactionDates: [100].map((days) => new Date(now.getTime() - days * 86400000)), activeWishlistCount: 0, now }), SEGMENTS.BARU_MUSIMAN);
+});
+
+test("reminder target segment limits simulated recipients", async () => {
+  const collector = await customer("Segmen Kolektor");
+  await db.wishlist.create({ data: { customerId: collector.id, category: "Dress" } });
+  const routine = await customer("Segmen Rutin");
+  await addHistory(routine.id, 3, [20, 10, 2]);
+  const template = await db.reminderTemplate.create({
+    data: { name: "Hanya kolektor", segment: "ALL", targetSegment: SEGMENTS.KOLEKTOR, message: "Hai {nama}." },
+  });
+  await processDueReminders(template.id);
+  assert.equal(await db.reminderLog.count({ where: { customerId: collector.id, templateId: template.id } }), 1);
+  assert.equal(await db.reminderLog.count({ where: { customerId: routine.id, templateId: template.id } }), 0);
+});
+
+test("personal reminder schedule is 09:00 Jakarta and not due before that time", async () => {
+  const now = new Date("2026-11-20T12:00:00+07:00");
+  const dates = ["2026-11-01T09:00:00+07:00", "2026-11-08T09:00:00+07:00", "2026-11-15T09:00:00+07:00"]
+    .map((createdAt) => ({ createdAt: new Date(createdAt) }));
+  assert.equal(personalSchedule(dates, new Date("2026-11-20T08:59:00+07:00")), null);
+  assert.equal(personalSchedule(dates, now)?.toISOString(), "2026-11-20T02:00:00.000Z");
+});
+
 test("customer creation and consent changes create minimal audit entries", async () => {
   const actor = await db.user.create({
     data: { name: "Owner Audit Uji", email: "owner-audit@example.test", role: "OWNER" },
@@ -271,6 +355,25 @@ test("customer creation and consent changes create minimal audit entries", async
   const consentLogs = await db.auditLog.findMany({ where: { entityId: customerId, action: "CUSTOMER_CONSENT_REVOKED" } });
   assert.equal(consentLogs.length, 1);
   assert.equal(consentLogs[0].userId, null);
+});
+
+test("cashier consent requires the exact consent text and audits a granted record", async () => {
+  const staff = await db.user.create({ data: { name: "Kasir Consent Uji", role: "CASHIER", branchId: branches[0].id } });
+  const buyer = await customer("Persetujuan Dicatat Kasir", false, false);
+  assert.equal(await recordCashierConsentRecord({
+    customerId: buyer.id, userId: staff.id, checked: false, consentText: MESSAGE_CONSENT_TEXT,
+  }), null);
+  assert.equal(await recordCashierConsentRecord({
+    customerId: buyer.id, userId: staff.id, checked: true, consentText: "Teks lain",
+  }), null);
+  const updated = await recordCashierConsentRecord({
+    customerId: buyer.id, userId: staff.id, checked: true, consentText: MESSAGE_CONSENT_TEXT,
+  });
+  assert.equal(updated?.marketingConsent, true);
+  const consent = await db.messageConsent.findFirst({ where: { customerId: buyer.id, source: "CASHIER" } });
+  const audit = await db.auditLog.findFirst({ where: { entityId: buyer.id, action: "CUSTOMER_CONSENT_GRANTED" } });
+  assert.equal(consent?.consentText, MESSAGE_CONSENT_TEXT);
+  assert.equal(audit?.userId, staff.id);
 });
 
 test("revoked message consent is audited and disables future messaging", async () => {
@@ -302,19 +405,33 @@ test("below-minimum and same-day purchases do not issue an extra stamp", async (
   assert.equal(await db.stamp.count({ where: { customerId: buyer.id, dayKey: jakartaDayKey() } }), 1);
 });
 
+test("transaction records whether the cashier offered a stamp", async () => {
+  const buyer = await customer("Tawaran Stamp Dicatat");
+  const result = await recordTransactionRecord({
+    customerId: buyer.id,
+    branchId: branches[0].id,
+    amount: STAMP_MINIMUM_TRANSACTION,
+    useStampDiscount: false,
+    stampOffered: false,
+  });
+  assert.equal(result?.result, "stamp-added");
+  const transaction = await db.transaction.findFirst({ where: { customerId: buyer.id }, orderBy: { createdAt: "desc" } });
+  assert.equal(transaction?.stampOffered, false);
+});
+
 test("three oldest stamps are discounted across all branches", async () => {
   for (const branch of branches) {
     const buyer = await customer(`Uji Diskon ${branch.name}`);
     await addHistory(buyer.id, 4, [5, 6, 7, 8]);
-    const result = await recordTransactionRecord({ customerId: buyer.id, branchId: branch.id, amount: 150001, useStampDiscount: true });
-    assert.deepEqual(result, { result: "stamp-added", discountAmount: 15000 });
+    const result = await recordTransactionRecord({ customerId: buyer.id, branchId: branch.id, amount: 200001, useStampDiscount: true });
+    assert.deepEqual(result, { result: "stamp-added", discountAmount: 20000 });
     const redeemed = await db.stamp.count({ where: { customerId: buyer.id, redeemedAt: { not: null } } });
     const activeHistory = await db.stamp.count({ where: { customerId: buyer.id, redeemedAt: null, dayKey: { not: jakartaDayKey() } } });
     const transaction = await db.transaction.findFirst({ where: { customerId: buyer.id, createdAt: { gte: new Date(Date.now() - 60000) } }, orderBy: { createdAt: "desc" } });
     assert.equal(redeemed, 3);
     assert.equal(activeHistory, 1);
-    assert.equal(transaction?.amount, 150001);
-    assert.equal(transaction?.discountAmount, 15000);
+    assert.equal(transaction?.amount, 200001);
+    assert.equal(transaction?.discountAmount, 20000);
     assert.ok(transaction?.redemptionId);
     assert.equal(await db.redemption.count({ where: { customerId: buyer.id, branchId: branch.id } }), 1);
 
@@ -323,10 +440,10 @@ test("three oldest stamps are discounted across all branches", async () => {
     const threeStampResult = await recordTransactionRecord({
       customerId: threeStampBuyer.id,
       branchId: branch.id,
-      amount: 150009,
+      amount: 200009,
       useStampDiscount: true,
     });
-    assert.deepEqual(threeStampResult, { result: "stamp-added", discountAmount: 15000 });
+    assert.deepEqual(threeStampResult, { result: "stamp-added", discountAmount: 20000 });
     assert.equal(await db.stamp.count({ where: { customerId: threeStampBuyer.id, redeemedAt: { not: null } } }), 3);
     assert.equal(await db.redemption.count({ where: { customerId: threeStampBuyer.id, branchId: branch.id } }), 1);
   }
@@ -439,7 +556,7 @@ test("void rejects a stamp already redeemed and a transaction outside the same J
   const expiredBuyer = await customer("Uji Batas Hari Void");
   const yesterday = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const expired = await db.transaction.create({
-    data: { customerId: expiredBuyer.id, branchId: branches[0].id, amount: 150000, createdAt: yesterday },
+    data: { customerId: expiredBuyer.id, branchId: branches[0].id, amount: STAMP_MINIMUM_TRANSACTION, createdAt: yesterday },
   });
   assert.equal(
     await voidTransactionRecord({
@@ -491,7 +608,7 @@ test("voided transactions do not count toward personal reminder history", async 
   const transactions = await Promise.all(
     dates.map((createdAt) =>
       db.transaction.create({
-        data: { customerId: buyer.id, branchId: branches[0].id, amount: 150000, createdAt },
+        data: { customerId: buyer.id, branchId: branches[0].id, amount: STAMP_MINIMUM_TRANSACTION, createdAt },
       }),
     ),
   );
@@ -577,6 +694,7 @@ test("wishlist notifications require consent and share the seven-day messaging c
 });
 
 test("reminder punctuality KPI counts early and late sends symmetrically", async () => {
+  await db.reminderLog.deleteMany();
   const template = await db.reminderTemplate.create({ data: { name: "Jadwal KPI", segment: "ALL", message: "Reminder" } });
   const early = await customer("Reminder Terlalu Awal");
   const withinWindow = await customer("Reminder Dalam Toleransi");
@@ -634,16 +752,121 @@ test("scheduled reminders require consent and share cooldown with stock notifica
   assert.equal(await db.reminderLog.count({ where: { customerId: outside.id, templateId: personal.id } }), 0);
 });
 
-test("daily stock confirmation is recorded and KPI returns eight target rows", async () => {
+test("follow-up queues include due reminders, one-stamp, inactive, and unmatched wishlist customers", async () => {
+  const due = await customer("Antrean Jatuh Tempo");
+  await addHistory(due.id, 3, [10, 7, 4]);
+  const oneStamp = await customer("Antrean Satu Stamp");
+  await addHistory(oneStamp.id, 2, [10, 8]);
+  const inactive = await customer("Antrean Tidak Aktif");
+  await addHistory(inactive.id, 1, [70]);
+  const wishlistCustomer = await customer("Antrean Wishlist");
+  const stock = await db.stockItem.create({ data: { name: "Outer Wishlist Antrean", category: "Outer", size: "L", branchId: branches[1].id } });
+  await db.wishlist.create({ data: { customerId: wishlistCustomer.id, category: "Outer", size: "L" } });
+  const staff = await db.user.create({ data: { name: "Manajer Followup", role: "MANAGER", branchId: branches[0].id } });
+  const followup = await markFollowedUpRecord({
+    customerId: oneStamp.id,
+    userId: staff.id,
+    branchId: branches[0].id,
+    queue: "SATU_STAMP",
+    note: "Sudah dihubungi",
+  });
+  assert.equal(followup.queue, FOLLOWUP_QUEUES[1]);
+  assert.equal(await db.auditLog.count({ where: { entityId: followup.id, action: "CUSTOMER_FOLLOWUP_RECORDED" } }), 1);
+
+  const queues = await getFollowUpQueues();
+  assert.ok(queues.JATUH_TEMPO.some(({ customerId }) => customerId === due.id));
+  assert.equal(queues.SATU_STAMP.some(({ customerId }) => customerId === oneStamp.id), false);
+  assert.ok(queues.TIDAK_AKTIF.some(({ customerId }) => customerId === inactive.id));
+  assert.ok(queues.WISHLIST_BELUM.some(({ customerId }) => customerId === wishlistCustomer.id));
+  assert.ok(stock.id);
+});
+
+test("rollout limits wishlist and reminders unless demo gating is disabled", async () => {
+  process.env.ROLLOUT_GATING = "on";
+  assert.equal(featureEnabledForBranch("wishlist", { rolloutStage: 1 }), false);
+  assert.equal(featureEnabledForBranch("stockNotification", { rolloutStage: 2 }), true);
+  const originalStages = await db.branch.findMany({ select: { id: true, rolloutStage: true } });
+  await db.branch.updateMany({ data: { rolloutStage: 2 } });
+  try {
+    assert.equal(await reminderEnabled(), false);
+    assert.equal(await processDueReminders(), 0);
+    process.env.ROLLOUT_GATING = "off";
+    assert.equal(featureEnabledForBranch("wishlist", { rolloutStage: 1 }), true);
+    assert.equal(await reminderEnabled(), true);
+  } finally {
+    for (const branch of originalStages) {
+      await db.branch.update({ where: { id: branch.id }, data: { rolloutStage: branch.rolloutStage } });
+    }
+    process.env.ROLLOUT_GATING = "off";
+  }
+});
+
+test("only owner may change rollout stage and stages are limited to one through three", async () => {
+  const owner = await db.user.create({ data: { name: "Owner Rollout", role: "OWNER" } });
+  await assert.rejects(() => setBranchRolloutStageRecord({
+    branchId: branches[0].id, rolloutStage: 2, userId: owner.id, userRole: "MANAGER",
+  }), /Forbidden/);
+  await assert.rejects(() => setBranchRolloutStageRecord({
+    branchId: branches[0].id, rolloutStage: 4, userId: owner.id, userRole: "OWNER",
+  }), /integer from 1 to 3/);
+  const updated = await setBranchRolloutStageRecord({
+    branchId: branches[0].id, rolloutStage: 2, userId: owner.id, userRole: "OWNER",
+  });
+  assert.ok(updated);
+  assert.equal((await db.branch.findUnique({ where: { id: branches[0].id } }))?.rolloutStage, 2);
+  assert.equal(await db.auditLog.count({ where: { entityId: branches[0].id, action: "BRANCH_ROLLOUT_STAGE_UPDATED" } }), 1);
+});
+
+test("dashboard summary excludes voided transactions and applies net discounts and period filters", async () => {
+  const now = new Date();
+  const recent = await customer("Ringkasan Dashboard");
+  const user = await db.user.create({ data: { name: "Owner Dashboard", email: "owner-dashboard@example.test", role: "OWNER" } });
+  await db.transaction.create({
+    data: { customerId: recent.id, branchId: branches[3].id, amount: 200000, discountAmount: 25000, createdAt: new Date(now.getTime() - 2 * 86400000) },
+  });
+  const voided = await db.transaction.create({
+    data: { customerId: recent.id, branchId: branches[3].id, amount: 900000, createdAt: new Date(now.getTime() - 2 * 86400000) },
+  });
+  await db.transactionVoid.create({
+    data: { transactionId: voided.id, userId: user.id, reason: "Transaksi uji dibatalkan" },
+  });
+  const [summary7, summary30, summary90, expected] = await Promise.all([
+    getDashboardSummary({ periodDays: 7, branchId: branches[3].id, now }),
+    getDashboardSummary({ periodDays: 30, branchId: branches[3].id, now }),
+    getDashboardSummary({ periodDays: 90, branchId: branches[3].id, now }),
+    db.transaction.aggregate({
+      where: { branchId: branches[3].id, createdAt: { gte: new Date(now.getTime() - 7 * 86400000) }, voidRecord: null },
+      _sum: { amount: true, discountAmount: true },
+    }),
+  ]);
+  assert.equal(summary7.summary.netSales, (expected._sum.amount ?? 0) - (expected._sum.discountAmount ?? 0));
+  assert.ok(summary7.summary.netSales < 900000);
+  assert.ok(summary30.summary.transactions >= summary7.summary.transactions);
+  assert.ok(summary90.summary.transactions >= summary30.summary.transactions);
+});
+
+test("daily stock confirmation records physical and system counts; QA KPI requires every branch", async () => {
   const confirmedBranch = branches[2];
-  const log = await confirmStockTodayRecord(confirmedBranch.id);
+  await assert.rejects(() => confirmStockTodayRecord(confirmedBranch.id, -1), /non-negative integer/);
+  const availableCount = await db.stockItem.count({ where: { branchId: confirmedBranch.id, status: "AVAILABLE" } });
+  const log = await confirmStockTodayRecord(confirmedBranch.id, availableCount + 1);
   assert.equal(log.type, "CONFIRM");
+  assert.equal(log.countedItems, availableCount + 1);
+  assert.equal(log.systemCount, availableCount);
   const sameDayLogs = await db.stockUpdateLog.findMany({ where: { branchId: confirmedBranch.id } });
   assert.ok(sameDayLogs.some((row) => jakartaDayKey(row.updatedAt) === jakartaDayKey()));
   const kpis = await getKpis();
   assert.deepEqual(kpis.map(({ code }) => code), ["S1", "S2", "S3", "S4", "S5", "S6", "S7a", "S7b"]);
   assert.ok(kpis.every(({ status }) => ["Tercapai", "Berjalan", "Belum"].includes(status)));
-  assert.equal(kpis.find(({ code }) => code === "S4")?.value, 0);
+  assert.equal(kpis.find(({ code }) => code === "S2")?.value, 0);
+  assert.ok(kpis.find(({ code }) => code === "S4")?.value > 0);
+  assert.ok(kpis.find(({ code }) => code === "S2")?.missingQaBranches?.length > 0);
+  await db.redemptionQaCheck.createMany({
+    data: branches.map((branch, index) => ({ branchId: branch.id, passed: index !== 1 })),
+  });
+  const verifiedS2 = (await getKpis()).find(({ code }) => code === "S2");
+  assert.equal(verifiedS2?.value, 75);
+  assert.deepEqual(verifiedS2?.missingQaBranches, []);
   await db.stockUpdateLog.create({ data: { branchId: branches[0].id, type: "CHANGE" } });
   assert.ok((await getKpis()).find(({ code }) => code === "S4")?.value > 0);
 });

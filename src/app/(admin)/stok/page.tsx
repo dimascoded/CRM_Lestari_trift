@@ -4,10 +4,8 @@ import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
-import { currentTime, DEFAULT_STOCK_NOTIFICATION_MESSAGE, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
+import { currentTime, DEAD_STOCK_DAYS, daysBefore, jakartaDayKey, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
 import { db } from "@/lib/db";
-import { renderStockNotificationMessage } from "@/lib/wishlist-match";
-import { describeMessageStatus } from "@/lib/message-status";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -25,13 +23,13 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
   const category = typeof params.category === "string" ? params.category : "";
   const requestedStatus = typeof params.itemStatus === "string" ? params.itemStatus : "";
   const itemStatus = ["AVAILABLE", "SOLD", "REMOVED"].includes(requestedStatus) ? requestedStatus : "";
-  const activeTab = params.tab === "log" ? "log" : "notifikasi";
+  const activeTab = "log";
   const editId = typeof params.edit === "string" ? params.edit : "";
   const showAdd = params.add === "1";
   const now = currentTime();
   const today = jakartaDayKey(now);
   const deadStockDate = daysBefore(DEAD_STOCK_DAYS, now);
-  const [branches, branchCounts, branchLogs, items, categoryRows, available, deadStock, notificationCount, editItem, notifications, logs] = await Promise.all([
+  const [branches, branchCounts, branchLogs, items, categoryRows, available, deadStock, notificationCount, editItem, logs] = await Promise.all([
     db.branch.findMany({ orderBy: { name: "asc" } }),
     db.stockItem.groupBy({ by: ["branchId"], where: { status: "AVAILABLE" }, _count: { _all: true } }),
     db.stockUpdateLog.findMany({ orderBy: { updatedAt: "desc" }, take: 1000, select: { id: true, branchId: true, type: true, updatedAt: true } }),
@@ -51,17 +49,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
     db.stockItem.count({ where: { status: "AVAILABLE", enteredAt: { lt: deadStockDate } } }),
     db.stockMatchNotification.count(),
     editId ? db.stockItem.findUnique({ where: { id: editId } }) : Promise.resolve(null),
-    activeTab === "notifikasi"
-      ? db.stockMatchNotification.findMany({
-          where: staff.role === "OWNER" ? {} : { stockItem: { branchId: staff.branchId ?? "" } },
-          include: { customer: true, stockItem: { include: { branch: true } } },
-          orderBy: { sentAt: "desc" },
-          take: 12,
-        })
-      : Promise.resolve([]),
-    activeTab === "log"
-      ? db.stockUpdateLog.findMany({ include: { branch: true }, orderBy: { updatedAt: "desc" }, take: 12 })
-      : Promise.resolve([]),
+    db.stockUpdateLog.findMany({ include: { branch: true }, orderBy: { updatedAt: "desc" }, take: 12 }),
   ]);
   const branchCountMap = new Map(branchCounts.map(({ branchId: id, _count }) => [id, _count._all]));
   const managedBranches = staff.role === "OWNER" ? branches : branches.filter(({ id }) => id === staff.branchId);
@@ -99,7 +87,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
               <p>{branchCountMap.get(branch.id) ?? 0} barang tersedia</p>
               <small>Perubahan katalog terakhir: {lastChange ? new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(lastChange) : "Belum ada"}</small>
               <small>Konfirmasi stok: {confirmedToday ? "Sudah dicatat hari ini" : "Belum dicatat hari ini"}</small>
-              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><button className="button small secondary" type="submit">{confirmedToday ? "Catat konfirmasi ulang" : "Konfirmasi stok hari ini"}</button></form>
+              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><label className="field">Jumlah barang fisik<input name="countedItems" type="number" min="0" step="1" required /></label><button className="button small secondary" type="submit">{confirmedToday ? "Catat konfirmasi ulang" : "Konfirmasi stok hari ini"}</button></form>
             </article>
           );
         })}
@@ -155,31 +143,10 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
         </section>
 
         <aside className="panel stock-side-panel">
-          <div className="panel-header"><div><h2 className="panel-title">Aktivitas stok</h2><p className="panel-subtitle">Notifikasi wishlist dan riwayat konfirmasi.</p></div></div>
-          <nav className="tabs stock-tabs" aria-label="Aktivitas stok"><Link className={`tab${activeTab === "notifikasi" ? " active" : ""}`} href="/stok?tab=notifikasi">Notifikasi</Link><Link className={`tab${activeTab === "log" ? " active" : ""}`} href="/stok?tab=log">Log</Link></nav>
+          <div className="panel-header"><div><h2 className="panel-title">Log aktivitas stok</h2><p className="panel-subtitle">Perubahan dan konfirmasi jumlah aktual.</p></div></div>
           <div className="activity-list">
-            {activeTab === "notifikasi"
-              ? notifications.map((notification) => {
-                const messageStatus = describeMessageStatus(notification.status);
-                  const body = notification.body || renderStockNotificationMessage(DEFAULT_STOCK_NOTIFICATION_MESSAGE, {
-                    customerName: notification.customer.name,
-                    stockName: notification.stockItem.name,
-                    size: notification.stockItem.size,
-                    branchName: notification.stockItem.branch.name,
-                  });
-                  return <div className="activity-row" key={notification.id}>
-                    <span className="activity-dot" />
-                    <div className="activity-body">
-                      <strong>{notification.customer.name}</strong>
-                      <small>{body}</small>
-                      <span className={`status ${messageStatus.isSimulated ? "" : "neutral"}`}>{messageStatus.label}</span>
-                    </div>
-                    <span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", timeZone: "Asia/Jakarta" }).format(notification.sentAt)}</span>
-                  </div>;
-                })
-              : logs.map((log) => <div className="activity-row" key={log.id}><span className="activity-dot" /><div className="activity-body"><strong>{log.branch.name}</strong><small>{log.type === "CONFIRM" ? "Stok dikonfirmasi" : "Katalog stok diperbarui"}</small></div><span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.updatedAt)}</span></div>)}
-            {activeTab === "notifikasi" && !notifications.length && <div className="empty-state">Belum ada notifikasi wishlist.</div>}
-            {activeTab === "log" && !logs.length && <div className="empty-state">Belum ada log pembaruan.</div>}
+            {logs.map((log) => <div className="activity-row" key={log.id}><span className="activity-dot" /><div className="activity-body"><strong>{log.branch.name}</strong><small>{log.type === "CONFIRM" ? `Hitung fisik ${log.countedItems ?? "—"} · sistem ${log.systemCount ?? "—"}` : "Katalog stok diperbarui"}</small></div><span className="activity-amount">{new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(log.updatedAt)}</span></div>)}
+            {!logs.length && <div className="empty-state">Belum ada log pembaruan.</div>}
           </div>
         </aside>
       </div>

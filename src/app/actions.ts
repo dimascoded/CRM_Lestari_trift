@@ -20,17 +20,24 @@ import {
 } from "@/lib/auth";
 import {
   normalizeWhatsApp,
+  ACQUISITION_CHANNELS,
+  FOLLOWUP_NOTE_MAX_LENGTH,
+  MESSAGE_CONSENT_TEXT,
+  REDEMPTION_QA_NOTE_MAX_LENGTH,
   STOCK_CATEGORIES,
   STOCK_SIZES,
+  SEGMENTS,
   TRANSACTION_VOID_REASON_MAX_LENGTH,
 } from "@/lib/business-rules";
 import { generateCustomerLoginCode, hashCustomerLoginCode, hashPassword, verifyCustomerLoginCode } from "@/lib/password";
 import { authenticateStaffRecord } from "@/lib/staff-auth-service";
-import { registerCustomerRecord, setCustomerMarketingConsent } from "@/lib/customer-service";
+import { recordCashierConsentRecord, registerCustomerRecord, setCustomerMarketingConsent } from "@/lib/customer-service";
 import { matchStockItem, matchWishlist } from "@/lib/wishlist-match";
 import { processDueReminders } from "@/lib/reminders";
 import { confirmStockTodayRecord } from "@/lib/stock-service";
 import { recordTransactionRecord, voidTransactionRecord } from "@/lib/transaction-service";
+import { featureEnabledForBranch, reminderEnabled, setBranchRolloutStageRecord } from "@/lib/rollout";
+import { FOLLOWUP_QUEUES, markFollowedUpRecord } from "@/lib/followup-service";
 
 function formText(formData: FormData, name: string) {
   const value = formData.get(name);
@@ -62,6 +69,7 @@ export async function registerCustomer(formData: FormData) {
   const whatsapp = normalizeWhatsApp(formText(formData, "whatsapp"));
   const branchId = formText(formData, "branchId");
   const marketingConsent = formData.get("marketingConsent") === "on";
+  const acquisitionChannel = formText(formData, "acquisitionChannel") || "DATANG_LANGSUNG";
 
   if (!name || !/^\+?\d{9,15}$/.test(whatsapp) || !branchId) {
     redirect("/kasir?status=invalid-customer");
@@ -70,9 +78,12 @@ export async function registerCustomer(formData: FormData) {
     redirect("/kasir?status=invalid-customer");
   }
   requireBranchAccess(staff, branchId);
-  const result = await registerCustomerRecord(name, whatsapp, branchId, marketingConsent, staff.id);
+  if (!(Object.keys(ACQUISITION_CHANNELS) as string[]).includes(acquisitionChannel)) {
+    redirect("/kasir?status=invalid-customer");
+  }
+  const result = await registerCustomerRecord(name, whatsapp, branchId, marketingConsent, staff.id, acquisitionChannel);
   if (result.duplicate) {
-    revalidatePath("/manajemen");
+    revalidatePath("/laporan");
     redirect("/kasir?status=duplicate");
   }
   revalidatePath("/");
@@ -87,12 +98,13 @@ export async function recordTransaction(formData: FormData) {
   const branchId = formText(formData, "branchId");
   const amount = Number(formText(formData, "amount"));
   const useStampDiscount = formData.get("useStampDiscount") === "on";
+  const stampOffered = formData.get("stampOffered") === "on";
   if (!customerId || !branchId || !Number.isSafeInteger(amount) || amount <= 0) {
     redirect("/kasir?status=invalid-transaction");
   }
   requireBranchAccess(staff, branchId);
 
-  const outcome = await recordTransactionRecord({ customerId, branchId, amount, useStampDiscount });
+  const outcome = await recordTransactionRecord({ customerId, branchId, amount, useStampDiscount, stampOffered });
   if (!outcome) redirect("/kasir?status=customer-not-found");
 
   revalidatePath("/");
@@ -123,16 +135,20 @@ export async function voidTransaction(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath("/kasir");
-  revalidatePath("/manajemen");
+  revalidatePath("/laporan");
   revalidatePath("/portal");
   redirect(`/kasir?customer=${encodeURIComponent(transaction.customerId)}&status=transaction-voided`);
 }
 
 export async function updateCustomerRecord(formData: FormData) {
-  const staff = await requireStaff(["OWNER", "MANAGER"]);
+  const staff = await requireStaff(["OWNER", "MANAGER", "CASHIER"]);
   const customerId = formText(formData, "customerId");
   const name = formText(formData, "name");
   const whatsapp = normalizeWhatsApp(formText(formData, "whatsapp"));
+  const favoriteCategory = formText(formData, "favoriteCategory");
+  const favoriteSize = formText(formData, "favoriteSize");
+  const birthDateValue = formText(formData, "birthDate");
+  const instagram = formText(formData, "instagram");
   if (!customerId || !name || name.length > 100 || !/^\+?\d{9,15}$/.test(whatsapp)) {
     redirect("/pelanggan?status=invalid-customer");
   }
@@ -142,19 +158,36 @@ export async function updateCustomerRecord(formData: FormData) {
   });
   if (!customer) redirect("/pelanggan?status=customer-not-found");
   requireBranchAccess(staff, customer.registeredAtId);
+  const birthDate = birthDateValue ? new Date(`${birthDateValue}T00:00:00+07:00`) : null;
+  if (
+    (birthDateValue && Number.isNaN(birthDate?.getTime())) ||
+    favoriteCategory.length > 80 ||
+    favoriteSize.length > 40 ||
+    instagram.length > 100
+  ) redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=invalid-customer`);
 
   const duplicate = await db.customer.findUnique({ where: { whatsapp }, select: { id: true } });
   if (duplicate && duplicate.id !== customerId) {
     await db.duplicateCheckLog.create({
       data: { attemptedName: name, branchId: customer.registeredAtId, existingCustomerId: duplicate.id },
     });
-    revalidatePath("/manajemen");
-    redirect(`/pelanggan?archived=${customer.active ? "0" : "1"}&edit=${encodeURIComponent(customerId)}&status=duplicate`);
+    revalidatePath("/laporan");
+    redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate`);
   }
 
   try {
     await db.$transaction(async (tx) => {
-      await tx.customer.update({ where: { id: customerId }, data: { name, whatsapp } });
+      await tx.customer.update({
+        where: { id: customerId },
+        data: {
+          name,
+          whatsapp,
+          ...(formData.has("favoriteCategory") ? { favoriteCategory: favoriteCategory || null } : {}),
+          ...(formData.has("favoriteSize") ? { favoriteSize: favoriteSize || null } : {}),
+          ...(formData.has("birthDate") ? { birthDate } : {}),
+          ...(formData.has("instagram") ? { instagram: instagram || null } : {}),
+        },
+      });
       await writeAuditLog(tx, {
         userId: staff.id,
         action: "CUSTOMER_UPDATED",
@@ -166,7 +199,7 @@ export async function updateCustomerRecord(formData: FormData) {
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      redirect(`/pelanggan?archived=${customer.active ? "0" : "1"}&edit=${encodeURIComponent(customerId)}&status=duplicate`);
+      redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate`);
     }
     throw error;
   }
@@ -174,7 +207,33 @@ export async function updateCustomerRecord(formData: FormData) {
   revalidatePath("/pelanggan");
   revalidatePath("/kasir");
   revalidatePath("/portal");
-  redirect(`/pelanggan?archived=${customer.active ? "0" : "1"}&status=customer-updated`);
+  redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=customer-updated`);
+}
+
+export async function recordCashierConsent(formData: FormData) {
+  const staff = await requireStaff(["CASHIER", "MANAGER", "OWNER"]);
+  const customerId = formText(formData, "customerId");
+  if (formData.get("marketingConsent") !== "on" || formText(formData, "consentText") !== MESSAGE_CONSENT_TEXT) {
+    redirect(`/kasir?customer=${encodeURIComponent(customerId)}&status=consent-required`);
+  }
+  const customer = await db.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, active: true, registeredAtId: true, optedOut: true },
+  });
+  if (!customer || !customer.active) redirect("/kasir?status=customer-not-found");
+  requireBranchAccess(staff, customer.registeredAtId);
+  if (customer.optedOut) redirect(`/kasir?customer=${encodeURIComponent(customerId)}&status=consent-opted-out`);
+  const updated = await recordCashierConsentRecord({
+    customerId,
+    userId: staff.id,
+    checked: true,
+    consentText: MESSAGE_CONSENT_TEXT,
+  });
+  if (!updated) redirect(`/kasir?customer=${encodeURIComponent(customerId)}&status=consent-required`);
+  revalidatePath("/kasir");
+  revalidatePath("/pelanggan");
+  revalidatePath(`/pelanggan/${customerId}`);
+  redirect(`/kasir?customer=${encodeURIComponent(customerId)}&status=consent-recorded`);
 }
 
 export async function setCustomerActive(formData: FormData) {
@@ -212,7 +271,7 @@ export async function setCustomerActive(formData: FormData) {
   revalidatePath("/pelanggan");
   revalidatePath("/kasir");
   revalidatePath("/portal");
-  revalidatePath("/manajemen");
+  revalidatePath("/laporan");
   redirect(`/pelanggan?archived=${active ? "0" : "1"}&status=${active ? "customer-restored" : "customer-archived"}`);
 }
 
@@ -534,6 +593,13 @@ export async function createWishlist(formData: FormData) {
   const category = formText(formData, "category");
   const size = formText(formData, "size");
   const keyword = formText(formData, "keyword");
+  const registeredCustomer = await db.customer.findUnique({
+    where: { id: customerId },
+    select: { registeredAt: { select: { rolloutStage: true } } },
+  });
+  if (!registeredCustomer || !featureEnabledForBranch("wishlist", registeredCustomer.registeredAt)) {
+    redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
+  }
   const validCategory = !category || (STOCK_CATEGORIES as readonly string[]).includes(category);
   const validSize = !size || (STOCK_SIZES as readonly string[]).includes(size);
   if (!customerId || (!category && !size && !keyword) || !validCategory || !validSize || keyword.length > 80) {
@@ -556,6 +622,13 @@ export async function updateWishlist(formData: FormData) {
   const category = formText(formData, "category");
   const size = formText(formData, "size");
   const keyword = formText(formData, "keyword");
+  const registeredCustomer = await db.customer.findUnique({
+    where: { id: customer.id },
+    select: { registeredAt: { select: { rolloutStage: true } } },
+  });
+  if (!registeredCustomer || !featureEnabledForBranch("wishlist", registeredCustomer.registeredAt)) {
+    redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
+  }
   const validCategory = !category || (STOCK_CATEGORIES as readonly string[]).includes(category);
   const validSize = !size || (STOCK_SIZES as readonly string[]).includes(size);
   if (!wishlistId || (!category && !size && !keyword) || !validCategory || !validSize || keyword.length > 80) {
@@ -581,6 +654,13 @@ export async function deleteWishlist(formData: FormData) {
   const { customer } = await requireCustomerSession();
   const wishlistId = formText(formData, "wishlistId");
   if (!wishlistId) redirect("/portal?tab=wishlist&status=invalid-wishlist-id");
+  const owned = await db.wishlist.findFirst({
+    where: { id: wishlistId, customerId: customer.id },
+    select: { customer: { select: { registeredAt: { select: { rolloutStage: true } } } } },
+  });
+  if (owned && !featureEnabledForBranch("wishlist", owned.customer.registeredAt)) {
+    redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
+  }
   const deleted = await db.wishlist.deleteMany({ where: { id: wishlistId, customerId: customer.id } });
   if (!deleted.count) redirect("/portal?tab=wishlist&status=invalid-wishlist-id");
   revalidatePath("/portal");
@@ -617,7 +697,7 @@ export async function updateMessagePreference(formData: FormData) {
     }
   });
   revalidatePath("/portal");
-  revalidatePath("/manajemen");
+  revalidatePath("/laporan");
   redirect("/portal?tab=profil&status=preference-updated");
 }
 
@@ -649,6 +729,7 @@ export async function createReminderTemplate(formData: FormData) {
   const name = formText(formData, "name");
   const message = formText(formData, "message");
   const segment = formText(formData, "segment");
+  const targetSegment = formText(formData, "targetSegment");
   const scheduleValue = formText(formData, "schedule");
   const schedule = scheduleValue ? new Date(`${scheduleValue}:00+07:00`) : null;
   if (
@@ -657,13 +738,14 @@ export async function createReminderTemplate(formData: FormData) {
     !message ||
     message.length > 1000 ||
     !["ALL", "NEW", "PERSONAL"].includes(segment) ||
+    (targetSegment && !(Object.values(SEGMENTS) as string[]).includes(targetSegment)) ||
     (scheduleValue && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(scheduleValue) || !schedule || Number.isNaN(schedule.getTime())))
   ) {
-    redirect("/manajemen?status=invalid-template");
+    redirect("/pesan?tab=reminder&status=invalid-template");
   }
   await db.$transaction(async (tx) => {
     const template = await tx.reminderTemplate.create({
-      data: { name, message, segment, schedule },
+      data: { name, message, segment, schedule, targetSegment: targetSegment || null },
       select: { id: true },
     });
     await writeAuditLog(tx, {
@@ -674,8 +756,8 @@ export async function createReminderTemplate(formData: FormData) {
       summary: "Template reminder dibuat.",
     });
   });
-  revalidatePath("/manajemen");
-  redirect("/manajemen?status=template-created");
+  revalidatePath("/pesan");
+  redirect("/pesan?tab=reminder&status=template-created");
 }
 
 export async function updateReminderTemplate(formData: FormData) {
@@ -684,6 +766,7 @@ export async function updateReminderTemplate(formData: FormData) {
   const name = formText(formData, "name");
   const message = formText(formData, "message");
   const segment = formText(formData, "segment");
+  const targetSegment = formText(formData, "targetSegment");
   const scheduleValue = formText(formData, "schedule");
   const schedule = scheduleValue ? new Date(`${scheduleValue}:00+07:00`) : null;
   if (
@@ -693,14 +776,15 @@ export async function updateReminderTemplate(formData: FormData) {
     !message ||
     message.length > 1000 ||
     !["ALL", "NEW", "PERSONAL"].includes(segment) ||
+    (targetSegment && !(Object.values(SEGMENTS) as string[]).includes(targetSegment)) ||
     (scheduleValue && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(scheduleValue) || !schedule || Number.isNaN(schedule.getTime())))
   ) {
-    redirect("/manajemen?tab=reminder&status=invalid-template");
+    redirect("/pesan?tab=reminder&status=invalid-template");
   }
   const updated = await db.$transaction(async (tx) => {
     const result = await tx.reminderTemplate.updateMany({
       where: { id: templateId },
-      data: { name, message, segment, schedule },
+      data: { name, message, segment, schedule, targetSegment: targetSegment || null },
     });
     if (result.count) {
       await writeAuditLog(tx, {
@@ -713,15 +797,15 @@ export async function updateReminderTemplate(formData: FormData) {
     }
     return result;
   });
-  if (!updated.count) redirect("/manajemen?tab=reminder&status=template-not-found");
-  revalidatePath("/manajemen");
-  redirect("/manajemen?tab=reminder&status=template-updated");
+  if (!updated.count) redirect("/pesan?tab=reminder&status=template-not-found");
+  revalidatePath("/pesan");
+  redirect("/pesan?tab=reminder&status=template-updated");
 }
 
 export async function updateStockNotificationTemplate(formData: FormData) {
   const staff = await requireStaff();
   const message = formText(formData, "message");
-  if (!message || message.length > 500) redirect("/notifikasi?status=invalid-stock-notification-template");
+  if (!message || message.length > 500) redirect("/pesan?tab=notifikasi&status=invalid-stock-notification-template");
   await db.$transaction(async (tx) => {
     await tx.stockNotificationTemplate.upsert({
       where: { id: "wishlist" },
@@ -736,18 +820,19 @@ export async function updateStockNotificationTemplate(formData: FormData) {
       summary: "Template notifikasi wishlist diperbarui.",
     });
   });
-  revalidatePath("/notifikasi");
+  revalidatePath("/pesan");
   revalidatePath("/stok");
   revalidatePath("/portal");
-  redirect("/notifikasi?status=stock-notification-template-updated");
+  redirect("/pesan?tab=notifikasi&status=stock-notification-template-updated");
 }
 
 export async function setReminderTemplateActive(formData: FormData) {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
   const templateId = formText(formData, "templateId");
   const activeValue = formText(formData, "active");
   if (!templateId || !["true", "false"].includes(activeValue)) {
-    redirect("/manajemen?tab=reminder&status=invalid-template-id");
+    redirect("/pesan?tab=reminder&status=invalid-template-id");
   }
   const updated = await db.$transaction(async (tx) => {
     const result = await tx.reminderTemplate.updateMany({
@@ -765,15 +850,15 @@ export async function setReminderTemplateActive(formData: FormData) {
     }
     return result;
   });
-  if (!updated.count) redirect("/manajemen?tab=reminder&status=template-not-found");
-  revalidatePath("/manajemen");
-  redirect(`/manajemen?tab=reminder&status=${activeValue === "true" ? "template-activated" : "template-deactivated"}`);
+  if (!updated.count) redirect("/pesan?tab=reminder&status=template-not-found");
+  revalidatePath("/pesan");
+  redirect(`/pesan?tab=reminder&status=${activeValue === "true" ? "template-activated" : "template-deactivated"}`);
 }
 
 export async function deleteReminderTemplate(formData: FormData) {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
   const templateId = formText(formData, "templateId");
-  if (!templateId) redirect("/manajemen?tab=reminder&status=invalid-template-id");
+  if (!templateId) redirect("/pesan?tab=reminder&status=invalid-template-id");
   const result = await db.$transaction(async (tx) => {
     const template = await tx.reminderTemplate.findUnique({ where: { id: templateId }, select: { id: true } });
     if (!template) return "missing" as const;
@@ -788,18 +873,19 @@ export async function deleteReminderTemplate(formData: FormData) {
     });
     return "deleted" as const;
   });
-  if (result === "missing") redirect("/manajemen?tab=reminder&status=template-not-found");
-  if (result === "history") redirect("/manajemen?tab=reminder&status=template-has-history");
-  revalidatePath("/manajemen");
-  redirect("/manajemen?tab=reminder&status=template-deleted");
+  if (result === "missing") redirect("/pesan?tab=reminder&status=template-not-found");
+  if (result === "history") redirect("/pesan?tab=reminder&status=template-has-history");
+  revalidatePath("/pesan");
+  redirect("/pesan?tab=reminder&status=template-deleted");
 }
 
 export async function sendReminderCampaign(formData: FormData) {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
   const templateId = formText(formData, "templateId");
-  if (!templateId) redirect("/manajemen?status=invalid-template-id");
+  if (!templateId) redirect("/pesan?tab=reminder&status=invalid-template-id");
   const template = await db.reminderTemplate.findUnique({ where: { id: templateId } });
-  if (!template || !template.active) redirect("/manajemen?status=template-not-found");
+  if (!template || !template.active) redirect("/pesan?tab=reminder&status=template-not-found");
   const sentCount = await processDueReminders(templateId);
   await recordAuditEvent({
     userId: staff.id,
@@ -809,12 +895,13 @@ export async function sendReminderCampaign(formData: FormData) {
     summary: `Kampanye simulasi dijalankan; catatan dibuat: ${sentCount}.`,
   });
   revalidatePath("/");
-  revalidatePath("/manajemen");
-  redirect(`/manajemen?tab=reminder&status=campaign-sent&count=${sentCount}`);
+  revalidatePath("/pesan");
+  redirect(`/pesan?tab=reminder&status=campaign-sent&count=${sentCount}`);
 }
 
 export async function runReminderScheduler() {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
   const sentCount = await processDueReminders();
   await recordAuditEvent({
     userId: staff.id,
@@ -823,22 +910,100 @@ export async function runReminderScheduler() {
     summary: `Scheduler simulasi dijalankan; catatan dibuat: ${sentCount}.`,
   });
   revalidatePath("/");
-  revalidatePath("/manajemen");
-  redirect(`/manajemen?tab=reminder&status=campaign-sent&count=${sentCount}`);
+  revalidatePath("/pesan");
+  redirect(`/pesan?tab=reminder&status=campaign-sent&count=${sentCount}`);
 }
 
 export async function confirmStockToday(formData: FormData) {
   const staff = await requireStaff(["STOCK_STAFF", "MANAGER", "OWNER"]);
   const branchId = formText(formData, "branchId");
+  const countedItems = Number(formText(formData, "countedItems"));
   if (!branchId || !(await db.branch.findUnique({ where: { id: branchId }, select: { id: true } }))) {
     redirect("/stok?status=invalid-stock");
   }
+  if (!Number.isSafeInteger(countedItems) || countedItems < 0) redirect("/stok?status=invalid-stock-count");
   requireBranchAccess(staff, branchId);
-  await confirmStockTodayRecord(branchId, staff.id);
+  const log = await confirmStockTodayRecord(branchId, countedItems, staff.id);
   revalidatePath("/");
   revalidatePath("/stok");
-  revalidatePath("/manajemen");
-  redirect("/stok?status=stock-confirmed");
+  revalidatePath("/laporan");
+  redirect(`/stok?status=${countedItems === log.systemCount ? "stock-confirmed" : "stock-count-mismatch"}&detail=${log.systemCount}`);
+}
+
+export async function recordRedemptionQaCheck(formData: FormData) {
+  const staff = await requireStaff(["OWNER", "MANAGER"]);
+  const branchId = formText(formData, "branchId");
+  const passedValue = formText(formData, "passed");
+  const note = formText(formData, "note");
+  if (!branchId || !["true", "false"].includes(passedValue) || note.length > REDEMPTION_QA_NOTE_MAX_LENGTH) {
+    redirect("/laporan?tab=qa&status=invalid-qa-check");
+  }
+  const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true } });
+  if (!branch) redirect("/laporan?tab=qa&status=invalid-qa-check");
+  requireBranchAccess(staff, branchId);
+  await db.$transaction(async (tx) => {
+    const check = await tx.redemptionQaCheck.create({
+      data: { branchId, userId: staff.id, passed: passedValue === "true", note },
+    });
+    await writeAuditLog(tx, {
+      userId: staff.id,
+      action: "REDEMPTION_QA_RECORDED",
+      entity: "REDEMPTION_QA_CHECK",
+      entityId: check.id,
+      branchId,
+      summary: `Uji tukar stamp ${passedValue === "true" ? "lulus" : "gagal"} dicatat.`,
+    });
+  });
+  revalidatePath("/laporan");
+  revalidatePath("/");
+  redirect("/laporan?tab=qa&status=qa-check-recorded");
+}
+
+export async function setBranchRolloutStage(formData: FormData) {
+  const staff = await requireStaff(["OWNER"]);
+  const branchId = formText(formData, "branchId");
+  const stage = Number(formText(formData, "rolloutStage"));
+  if (!branchId || !Number.isInteger(stage) || stage < 1 || stage > 3) {
+    redirect("/strategi?status=invalid-rollout-stage");
+  }
+  const branch = await setBranchRolloutStageRecord({
+    branchId,
+    rolloutStage: stage,
+    userId: staff.id,
+    userRole: staff.role,
+  });
+  if (!branch) redirect("/strategi?status=branch-not-found");
+  revalidatePath("/strategi");
+  revalidatePath("/");
+  revalidatePath("/pesan");
+  redirect("/strategi?status=rollout-stage-updated");
+}
+
+export async function markFollowedUp(formData: FormData) {
+  const staff = await requireStaff();
+  const customerId = formText(formData, "customerId");
+  const queue = formText(formData, "queue");
+  const note = formText(formData, "note");
+  if (!customerId || !FOLLOWUP_QUEUES.includes(queue as (typeof FOLLOWUP_QUEUES)[number]) || note.length > FOLLOWUP_NOTE_MAX_LENGTH) {
+    redirect("/pesan?tab=antrean&status=invalid-followup");
+  }
+  const customer = await db.customer.findUnique({
+    where: { id: customerId },
+    select: { active: true, registeredAtId: true },
+  });
+  if (!customer?.active) redirect("/pesan?tab=antrean&status=customer-not-found");
+  requireBranchAccess(staff, customer.registeredAtId);
+  await markFollowedUpRecord({
+    customerId,
+    userId: staff.id,
+    branchId: customer.registeredAtId,
+    queue,
+    note,
+  });
+  revalidatePath("/pesan");
+  revalidatePath("/pelanggan");
+  revalidatePath(`/pelanggan/${customerId}`);
+  redirect("/pesan?tab=antrean&status=followup-recorded");
 }
 
 export async function beginPortalLogin(formData: FormData) {
