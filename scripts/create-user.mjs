@@ -2,15 +2,14 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/password.ts";
-import { askHidden } from "./hidden-input.mjs";
 
 const db = new PrismaClient();
 const roles = ["CASHIER", "STOCK_STAFF", "MANAGER", "MARKETING", "OWNER"];
 const input = createInterface({ input: stdin, output: stdout });
 
 async function main() {
-  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
-    throw new Error("Run this command from an interactive terminal so the password can be hidden.");
+  if (!stdin.isTTY) {
+    throw new Error("Run this command from an interactive terminal.");
   }
 
   const name = (await input.question("Nama staf: ")).trim();
@@ -39,10 +38,7 @@ async function main() {
   const existing = await db.user.findUnique({ where: { email } });
   if (existing) throw new Error("Email sudah digunakan.");
 
-  input.close();
-  const password = await askHidden("Password (min. 12 karakter): ");
-  const confirmation = await askHidden("Ulangi password: ");
-  if (password !== confirmation) throw new Error("Password tidak sama.");
+  const password = await input.question("Password (min. 12 karakter): ");
   if (password.length < 12 || password.length > 200) {
     throw new Error("Password harus berisi 12 sampai 200 karakter.");
   }
