@@ -1,3 +1,5 @@
+# Arsip: sudah diterapkan.
+
 # Instruksi Perubahan: CRM_Lestari_trift
 
 Patuhi `AGENTS.md` repo: logika bisnis di `src/lib/*-service.ts`, konstanta di `src/lib/business-rules.ts`, Server Action memeriksa peran dan cabang lalu memanggil service, operasi multi-tabel memakai `db.$transaction`, WhatsApp dan OTP tetap simulasi, data sintetis saja. Sebelum memakai fitur Next.js yang belum dipakai repo (route dinamis `[id]`, `instrumentation.ts`), baca panduannya di `node_modules/next/dist/docs/`. Kerjakan berurutan T1 sampai T12. Setelah selesai jalankan `npm run lint`, `npm run build`, `npm run test:regression`. Portal pelanggan dipertahankan. Akun staf tetap dibuat lewat `npm run user:create`. Pendaftaran mandiri pelanggan tidak dibuat.

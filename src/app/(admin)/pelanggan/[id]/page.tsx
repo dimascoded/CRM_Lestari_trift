@@ -75,7 +75,7 @@ export default async function CustomerDetailPage({ params, searchParams }: Props
       <div className="stat-card"><div className="stat-top"><span>Stamp aktif</span></div><div className="stat-number">{activeStampCount}/{STAMPS_PER_REDEMPTION}</div><div className="progress-bar"><span style={{ width: `${Math.min(activeStampCount / STAMPS_PER_REDEMPTION * 100, 100)}%` }} /></div></div>
       <div className="stat-card"><div className="stat-top"><span>Persetujuan pesan</span></div><div className="stat-number">{customer.optedOut ? "Opt-out" : customer.marketingConsent ? "Setuju" : "Belum setuju"}</div><div className="stat-foot"><span>{customer.active ? "Pelanggan aktif" : "Diarsipkan"}</span></div></div>
     </div>
-    {!customer.marketingConsent && !customer.optedOut && <form action={recordCashierConsent} className="warning-callout section-spacer">
+    {!customer.marketingConsent && !customer.optedOut && <form id="persetujuan" action={recordCashierConsent} className="warning-callout section-spacer">
       <input type="hidden" name="customerId" value={customer.id} /><input type="hidden" name="consentText" value={MESSAGE_CONSENT_TEXT} />
       <label className="checkbox-field"><input type="checkbox" name="marketingConsent" required /> Pelanggan menyatakan setuju: “{MESSAGE_CONSENT_TEXT}”</label>
       <button className="button small" type="submit">Catat persetujuan</button>

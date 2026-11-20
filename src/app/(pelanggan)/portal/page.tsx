@@ -7,7 +7,7 @@ import { StockCatalog } from "@/components/StockCatalog";
 import { getCustomerSession } from "@/lib/auth";
 import { MESSAGE_CONSENT_TEXT, REDEMPTION_DISCOUNT_PERCENT, STAMPS_PER_REDEMPTION, rupiah, STOCK_CATEGORIES, STOCK_SIZES } from "@/lib/business-rules";
 import { db } from "@/lib/db";
-import { featureEnabledForBranch } from "@/lib/rollout";
+import { featureEnabled } from "@/lib/rollout";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const portalTabs = [
@@ -37,7 +37,6 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
     ? await db.customer.findUnique({
         where: { id: customerSession.customer.id },
         include: {
-          registeredAt: { select: { rolloutStage: true } },
           stamps: { orderBy: { createdAt: "desc" }, include: { branch: true } },
           transactions: {
             orderBy: { createdAt: "desc" },
@@ -90,7 +89,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
   const hasDiscount = activeStamps.length >= STAMPS_PER_REDEMPTION;
   const progress = activeStamps.length % STAMPS_PER_REDEMPTION;
   const editingWishlist = customer.wishlists.find(({ id }) => id === requestedEditWishlist);
-  const wishlistEnabled = featureEnabledForBranch("wishlist", customer.registeredAt);
+  const wishlistEnabled = await featureEnabled("wishlist");
 
   return (
     <div className="page-content">
@@ -145,7 +144,7 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
       {tab === "wishlist" && (
         <section className="form-card portal-section">
           <h2>{editingWishlist ? "Ubah wishlist" : "Wishlist"}</h2><p>{editingWishlist ? "Perbarui kriteria; riwayat notifikasi yang sudah tercatat tetap disimpan." : "Tambahkan kategori, ukuran, atau kata kunci yang sedang dicari."}</p>
-          {!wishlistEnabled && <div className="warning-callout">Fitur belum aktif di tahap roll-out cabang ini.</div>}
+          {!wishlistEnabled && <div className="warning-callout">Fitur belum aktif: tahap roll-out belum mencapai tahap 2.</div>}
           {requestedEditWishlist && !editingWishlist && <Notice status="invalid-wishlist-id" />}
           {wishlistEnabled && <form action={editingWishlist ? updateWishlist : createWishlist}>
             {editingWishlist && <input type="hidden" name="wishlistId" value={editingWishlist.id} />}

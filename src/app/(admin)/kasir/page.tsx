@@ -144,19 +144,41 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
             <section className="cashier-customer">
               <div className="panel cashier-profile">
                 <div className="panel-header"><div><h2 className="panel-title">{selected.name}</h2><p className="panel-subtitle">{selected.whatsapp} · Terdaftar di {selected.registeredAt.name}</p><span className="tag">{segment}</span></div><Link className="inline-action" href="/kasir">Tutup ×</Link></div>
-                {!selected.marketingConsent && !selected.optedOut && <form action={recordCashierConsent} className="warning-callout section-spacer">
+                <div className="cashier-stamp">
+                  <div className="progress-label"><strong>Stamp aktif</strong><span>{activeStamps}/{STAMPS_PER_REDEMPTION}</span></div>
+                  <div className="progress-bar"><span style={{ width: `${Math.min(activeStamps / STAMPS_PER_REDEMPTION * 100, 100)}%` }} /></div>
+                </div>
+                {!selected.marketingConsent && !selected.optedOut && <form id="persetujuan" action={recordCashierConsent} className="warning-callout section-spacer">
                   <input type="hidden" name="customerId" value={selected.id} />
                   <input type="hidden" name="consentText" value={MESSAGE_CONSENT_TEXT} />
                   <label className="checkbox-field"><input type="checkbox" name="marketingConsent" required /> Pelanggan menyatakan setuju: “{MESSAGE_CONSENT_TEXT}”</label>
                   <button className="button small" type="submit">Catat persetujuan</button>
                 </form>}
-                <div className="cashier-stamp">
-                  <div className="progress-label"><strong>Stamp aktif</strong><span>{activeStamps}/{STAMPS_PER_REDEMPTION}</span></div>
-                  <div className="progress-bar"><span style={{ width: `${Math.min(activeStamps / STAMPS_PER_REDEMPTION * 100, 100)}%` }} /></div>
-                  {activeStamps >= STAMPS_PER_REDEMPTION && <div className="success-callout">Pelanggan punya 3 stamp. Diskon {REDEMPTION_DISCOUNT_PERCENT}% diterapkan otomatis pada transaksi ini.</div>}
-                </div>
+                {nonVoidedTransactionCount >= PROFILE_PROMPT_AFTER_TRANSACTIONS && profileIncomplete && <div className="warning-callout cashier-banner">Lengkapi profil pelanggan. <Link href={`/pelanggan/${encodeURIComponent(selected.id)}`}>Buka profil</Link></div>}
+                {activeStamps >= STAMPS_PER_REDEMPTION && <div className="success-callout cashier-banner">Pelanggan punya {STAMPS_PER_REDEMPTION} stamp. Diskon {REDEMPTION_DISCOUNT_PERCENT}% diterapkan otomatis pada transaksi ini.</div>}
+              </div>
+
+              <section className="form-card cashier-form">
+                <h2>Catat transaksi</h2>
+                <p>Minimum untuk mendapat stamp {rupiah(STAMP_MINIMUM_TRANSACTION)} · Maksimal satu stamp per hari per pelanggan.</p>
+                <p className="field-hint">Tawarkan stamp: {activeStamps}/{STAMPS_PER_REDEMPTION} stamp aktif</p>
+                <form action={recordTransaction}>
+                  <input type="hidden" name="customerId" value={selected.id} />
+                  <div className="form-grid">
+                    <div className="field"><label htmlFor="transaction-branch">Cabang</label>{staff.role === "OWNER"
+                      ? <select id="transaction-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+                      : <><strong>{staffBranch?.name ?? "Cabang staf"}</strong><input type="hidden" name="branchId" value={staff.branchId ?? ""} /></>}</div>
+                    <div className="field"><label htmlFor="transaction-amount">Nominal sebelum diskon (Rp)</label><input id="transaction-amount" name="amount" type="number" min="1" step="1" required placeholder="100000" /></div>
+                  </div>
+                  <label className="checkbox-field"><input type="checkbox" name="stampOffered" defaultChecked /> Stamp sudah ditawarkan ke pelanggan</label>
+                  <label className="checkbox-field"><input type="checkbox" name="useStampDiscount" defaultChecked /> Gunakan diskon stamp jika tersedia ({REDEMPTION_DISCOUNT_PERCENT}%)</label>
+                  <div className="form-actions"><button className="button" type="submit">Simpan transaksi</button></div>
+                </form>
+              </section>
+
+              <details className="cashier-history-details">
+                <summary>Riwayat transaksi</summary>
                 <div className="cashier-history">
-                  <strong>Tiga transaksi terakhir</strong>
                   {selected.transactions.map((transaction) => (
                     <div className="cashier-transaction" key={transaction.id}>
                       <div className="activity-row">
@@ -190,26 +212,7 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
                   ))}
                   {!selected.transactions.length && <div className="empty-state">Belum ada transaksi.</div>}
                 </div>
-              </div>
-
-              <section className="form-card cashier-form">
-                <h2>Catat transaksi</h2>
-                <p>Minimum untuk mendapat stamp {rupiah(STAMP_MINIMUM_TRANSACTION)} · Maksimal satu stamp per hari per pelanggan.</p>
-                <p className="field-hint">Tawarkan stamp: {activeStamps}/{STAMPS_PER_REDEMPTION} stamp aktif</p>
-                {nonVoidedTransactionCount >= PROFILE_PROMPT_AFTER_TRANSACTIONS && profileIncomplete && <div className="warning-callout">Lengkapi profil pelanggan. <Link href={`/pelanggan/${encodeURIComponent(selected.id)}`}>Buka profil</Link></div>}
-                <form action={recordTransaction}>
-                  <input type="hidden" name="customerId" value={selected.id} />
-                  <div className="form-grid">
-                    <div className="field"><label htmlFor="transaction-branch">Cabang</label>{staff.role === "OWNER"
-                      ? <select id="transaction-branch" name="branchId" required defaultValue=""><option value="" disabled>Pilih cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
-                      : <><strong>{staffBranch?.name ?? "Cabang staf"}</strong><input type="hidden" name="branchId" value={staff.branchId ?? ""} /></>}</div>
-                    <div className="field"><label htmlFor="transaction-amount">Nominal sebelum diskon (Rp)</label><input id="transaction-amount" name="amount" type="number" min="1" step="1" required placeholder="100000" /></div>
-                  </div>
-                  <label className="checkbox-field"><input type="checkbox" name="stampOffered" defaultChecked /> Stamp sudah ditawarkan ke pelanggan</label>
-                  <label className="checkbox-field"><input type="checkbox" name="useStampDiscount" defaultChecked /> Gunakan diskon stamp jika tersedia ({REDEMPTION_DISCOUNT_PERCENT}%)</label>
-                  <div className="form-actions"><button className="button" type="submit">Simpan transaksi</button></div>
-                </form>
-              </section>
+              </details>
             </section>
           ) : (
             <div className="empty-state panel">Cari dan pilih pelanggan untuk membuka profil serta form transaksi.</div>

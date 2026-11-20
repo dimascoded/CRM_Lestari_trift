@@ -34,13 +34,14 @@ export default async function StrategyPage({ searchParams }: { searchParams: Sea
   const activeChannelEntries = channelGroups.map(([key, label]) => ({ label, count: channelCount.get(key) ?? 0 }));
   const availableBranches = new Set(stockToday.map(({ branchId }) => branchId)).size;
   const status = typeof params.status === "string" ? params.status : undefined;
-  const mapping: { name: string; feature: string; href: string; code: KpiRow["code"] }[] = [
-    { name: "Database terpusat", feature: "Profil pelanggan lintas cabang", href: "/pelanggan", code: "S1" },
-    { name: "Stamp digital", feature: "Stamp dan penukaran lintas cabang", href: "/kasir", code: "S3" },
-    { name: "Wishlist & notifikasi stok", feature: "Pencocokan stok tersedia", href: "/pesan?tab=notifikasi", code: "S5" },
-    { name: "Reminder personal", feature: "Reminder simulasi dan jadwal", href: "/pesan?tab=reminder", code: "S6" },
-    { name: "Pemantauan", feature: "KPI, stok, dan tindak lanjut", href: "/laporan", code: "S4" },
+  const mapping: { name: string; feature: string; href: string; codes: { code: KpiRow["code"]; phase: string }[] }[] = [
+    { name: "Database terpusat", feature: "Profil pelanggan lintas cabang", href: "/pelanggan", codes: [{ code: "S1", phase: "segera" }] },
+    { name: "Stamp digital", feature: "Stamp dan diskon lintas cabang", href: "/kasir", codes: [{ code: "S2", phase: "segera" }, { code: "S3", phase: "jangka panjang" }] },
+    { name: "Wishlist dan notifikasi stok", feature: "Pencocokan stok tersedia", href: "/pesan?tab=notifikasi", codes: [{ code: "S4", phase: "segera" }, { code: "S5", phase: "jangka panjang" }] },
+    { name: "Reminder personal", feature: "Reminder simulasi dan jadwal", href: "/pesan?tab=reminder", codes: [{ code: "S6", phase: "segera" }, { code: "S7a", phase: "jangka panjang" }, { code: "S7b", phase: "jangka panjang" }] },
   ];
+  const formatKpi = (value: number, unit: string) =>
+    `${unit === "kali" ? value.toFixed(2) : value.toLocaleString("id-ID", { maximumFractionDigits: 1 })}${unit === "%" ? "%" : ` ${unit}`}`;
 
   return <div className="page-content">
     <PageHeader eyebrow="UTAMA · STRATEGI CRM" title="Strategi CRM" description="Visi, prioritas, segmen pelanggan, roll-out, dan pemetaan enabler Lestari." />
@@ -61,7 +62,7 @@ export default async function StrategyPage({ searchParams }: { searchParams: Sea
       </tbody></table></div>
     </section>
 
-    <section className="table-card section-spacer"><div className="table-titlebar"><div><h2>Tahap roll-out per cabang</h2><p>Fitur wishlist/notifikasi tersedia mulai tahap 2; reminder mengikuti cabang tertinggi tahap 3.</p></div></div>
+    <section className="table-card section-spacer"><div className="table-titlebar"><div><h2>Tahap roll-out per cabang</h2><p>Wishlist dan notifikasi stok aktif bila ada cabang tahap 2 atau lebih; reminder aktif bila ada cabang tahap 3.</p></div></div>
       <div className="branch-update-grid">{branches.map((branch) => <article className="branch-update-card" key={branch.id}>
         <strong>{branch.name}</strong><span className="tag">Tahap {branch.rolloutStage}</span>
         {staff.role === "OWNER" && <form action={setBranchRolloutStage}><input type="hidden" name="branchId" value={branch.id} />
@@ -72,9 +73,13 @@ export default async function StrategyPage({ searchParams }: { searchParams: Sea
     </section>
 
     <section className="table-card section-spacer"><div className="table-titlebar"><div><h2>Pemetaan BDN</h2><p>IT enabler, fitur layar, dan status KPI.</p></div></div>
-      <div className="table-scroll"><table><thead><tr><th>IT ENABLER</th><th>FITUR</th><th>LAYAR</th><th>KPI</th><th>STATUS</th></tr></thead><tbody>
-        {mapping.map((item) => { const kpi = kpiByCode.get(item.code); return <tr key={item.name}><td>{item.name}</td><td>{item.feature}</td><td><Link href={item.href}>Buka ↗</Link></td><td>{item.code}</td><td>{kpi?.status ?? "Belum"}</td></tr>; })}
+      <div className="table-scroll"><table><thead><tr><th>IT ENABLER</th><th>FITUR</th><th>LAYAR</th><th>KODE</th><th>CAPAIAN</th><th>STATUS</th></tr></thead><tbody>
+        {mapping.flatMap((item) => item.codes.map(({ code, phase }) => {
+          const kpi = kpiByCode.get(code);
+          return <tr key={`${item.name}-${code}`}><td>{item.name}</td><td>{item.feature}</td><td><Link href={item.href}>{item.href}</Link></td><td><strong>{code}</strong><small className="table-subtext">{phase}</small></td><td>{kpi ? formatKpi(kpi.value, kpi.unit) : "—"}</td><td>{kpi ? <span className={`status ${kpi.status === "Tercapai" ? "" : kpi.status === "Berjalan" ? "warning" : "neutral"}`}>{kpi.status}</span> : "Belum"}</td></tr>;
+        }))}
       </tbody></table></div>
+      <div className="table-titlebar"><Link className="inline-action" href="/laporan">Semua KPI</Link></div>
     </section>
 
     <section className="section-spacer"><h2>Quick win terhitung</h2><div className="stats-grid">

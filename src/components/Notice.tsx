@@ -37,7 +37,7 @@ const messages: Record<string, { text: string; tone?: "success" | "warning" | "e
   "consent-recorded": { text: "Persetujuan pesan dicatat dari kasir.", tone: "success" },
   "consent-required": { text: "Persetujuan hanya dapat dicatat setelah pelanggan mencentang pernyataan persetujuan.", tone: "error" },
   "consent-opted-out": { text: "Pelanggan telah memilih berhenti menerima pesan; jangan catat persetujuan dari kasir.", tone: "warning" },
-  "rollout-feature-disabled": { text: "Fitur belum aktif di tahap roll-out cabang ini.", tone: "warning" },
+  "rollout-feature-disabled": { text: "", tone: "warning" },
   "qa-check-recorded": { text: "Hasil uji tukar stamp berhasil dicatat.", tone: "success" },
   "invalid-qa-check": { text: "Pilih cabang dan hasil uji yang valid.", tone: "error" },
   "invalid-rollout-stage": { text: "Tahap roll-out harus berupa angka 1 sampai 3.", tone: "error" },
@@ -83,11 +83,13 @@ export function Notice({
   detail,
   discount,
   amount,
+  requiredStage = 2,
 }: {
   status?: string;
   detail?: string;
   discount?: string;
   amount?: string;
+  requiredStage?: 2 | 3;
 }) {
   if (!status) return null;
   if (status === "campaign-sent") {
@@ -97,7 +99,9 @@ export function Notice({
   if (!message) return null;
   const discountAmount = Number(discount);
   const transactionAmount = Number(amount);
-  const text = discountAmount > 0 && Number.isFinite(transactionAmount)
+  const text = status === "rollout-feature-disabled"
+    ? `Fitur belum aktif: tahap roll-out belum mencapai tahap ${requiredStage}.`
+    : discountAmount > 0 && Number.isFinite(transactionAmount)
     ? `Diskon stamp ${rupiah(discountAmount)} diterapkan, total bayar ${rupiah(transactionAmount - discountAmount)}. ${message.text}`
     : status === "stock-added" && detail
       ? `Stok tersimpan. ${detail} wishlist cocok ditemukan; simulasi notifikasi WhatsApp dibuat.`

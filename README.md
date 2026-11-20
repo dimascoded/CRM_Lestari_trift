@@ -52,11 +52,11 @@ Pelanggan dapat dicari, diedit, diarsipkan, dan dipulihkan oleh staf berwenang. 
 
 Stok dapat diedit atau dikeluarkan sementara dari katalog lalu dipulihkan. Wishlist dapat diedit, dinonaktifkan, atau dihapus oleh pemiliknya. Template reminder dapat diedit atau dinonaktifkan; template tanpa riwayat dapat dihapus. Transaksi dan riwayat stamp tidak dapat diedit atau dihapus. OWNER/MANAGER dapat membatalkan transaksi dengan alasan wajib pada hari kalender yang sama (Asia/Jakarta); transaksi asli tetap tersimpan, stamp hasilnya ditandai batal, dan penukaran stamp dipulihkan dengan jejak yang tetap tersimpan. Pembatalan ditolak jika stamp hasil transaksi sudah ditukar. Hanya OWNER yang dapat membuat dan mengelola akun staf; penonaktifan akun mencabut sesi tanpa menghapus riwayat.
 
-Menu **Pesan** menyediakan antrean tindak lanjut, reminder, notifikasi wishlist, dan log simulasi. Laporan operasional berada di `/laporan`, profil pelanggan di `/pelanggan/[id]`, dan ringkasan strategi di `/strategi`.
+Menu **Pesan** menyediakan antrean tindak lanjut menurut jenis, reminder, notifikasi wishlist, dan log simulasi. Antrean menampilkan satu jenis per layar; pesan hanya dapat disalin untuk dikirim manual di luar aplikasi oleh staf yang memiliki persetujuan aktif. Tidak ada pengiriman dari antrean. Tab reminder hanya tersedia untuk OWNER, MANAGER, dan MARKETING. Laporan operasional berada di `/laporan`, profil pelanggan di `/pelanggan/[id]`, dan ringkasan strategi di `/strategi`.
 
 Login pelanggan memakai OTP acak hanya di lingkungan pengembangan; kode ditampilkan di terminal server dan kedaluwarsa setelah 5 menit. Login pelanggan di production ditolak sampai provider OTP WhatsApp disambungkan. Jangan gunakan purwarupa ini untuk data pelanggan nyata sebelum integrasi itu dan tinjauan keamanan selesai.
 
-Scheduler manual tersedia di **Pesan → Reminder**. Scheduler lokal opsional berjalan setiap 15 menit hanya ketika `ENABLE_LOCAL_SCHEDULER=true`; nilai default tidak aktif. Proses membuat catatan simulasi saja dan tidak mengirim pesan nyata. `ROLLOUT_GATING=off` melewati pembatasan tahap rollout untuk demo; default `on`.
+Scheduler manual tersedia di **Pesan → Reminder**. Scheduler lokal opsional berjalan setiap 15 menit hanya ketika `ENABLE_LOCAL_SCHEDULER=true`; nilai default tidak aktif. Proses membuat catatan simulasi saja dan tidak mengirim pesan nyata. `ROLLOUT_GATING=off` melewati pembatasan tahap roll-out untuk demo; default `on`. Dengan gating aktif, wishlist dan notifikasi stok aktif bila ada cabang tahap 2 atau lebih, sedangkan reminder aktif bila ada cabang tahap 3.
 
 ## Nilai demo dan batasan
 
@@ -66,6 +66,7 @@ Scheduler manual tersedia di **Pesan → Reminder**. Scheduler lokal opsional be
 - Pesan memerlukan persetujuan eksplisit. Pendaftaran kasir tidak memilih persetujuan otomatis; persetujuan dan pencabutan dicatat beserta sumber, versi teks, dan waktunya. Pelanggan lama dimigrasikan tanpa persetujuan.
 - Batas satu pesan per tujuh hari berlaku gabungan untuk reminder dan notifikasi wishlist, bukan satu batas terpisah per jenis pesan.
 - Reminder dan notifikasi wishlist hanya membuat catatan simulasi di database; tidak ada pesan yang dikirim dan tidak diperlukan API atau biaya WhatsApp.
+- Antrean tindak lanjut menampilkan Jatuh tempo, Satu stamp lagi, Tidak aktif, atau Wishlist belum diproses secara terpisah. Salin pesan tidak mengirimkannya; staf harus mengirim manual di luar aplikasi dan hanya boleh menghubungi pelanggan dengan persetujuan aktif yang belum opt-out.
 - `/api/cron/reminders` memproses reminder yang jatuh tempo dan memerlukan secret di atas. Endpoint bukan scheduler otomatis; jangan mengeksposnya ke internet tanpa kontrol operasional yang sesuai.
 - Checklist peran, SOP, pelatihan, risiko, evaluasi bulanan, dan gerbang pilot ada di [docs/operasional-crm.md](./docs/operasional-crm.md).
 - Data pelanggan dan katalog pada database lokal hanyalah data contoh sintetis.

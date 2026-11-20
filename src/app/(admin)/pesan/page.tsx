@@ -9,24 +9,20 @@ import {
   updateReminderTemplate,
 } from "@/app/actions";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
+import { CopyMessageButton } from "@/components/CopyMessageButton";
 import NotificationTab from "@/components/NotificationTab";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
 import { FOLLOWUP_QUEUES, getFollowUpQueues, type FollowUpQueue } from "@/lib/followup-service";
+import { followUpMessage } from "@/lib/followup-messages";
 import { reminderEnabled } from "@/lib/rollout";
 import { FOLLOWUP_NOTE_MAX_LENGTH, SEGMENTS, REMINDER_COOLDOWN_DAYS } from "@/lib/business-rules";
 import { db } from "@/lib/db";
 import { describeMessageStatus } from "@/lib/message-status";
+import { resolveMessageTab, visibleMessageTabs, type MessageTab } from "@/lib/message-tabs";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-const tabs = [
-  { id: "antrean", label: "Antrean" },
-  { id: "reminder", label: "Reminder" },
-  { id: "notifikasi", label: "Notifikasi" },
-  { id: "log", label: "Log" },
-] as const;
-type Tab = (typeof tabs)[number]["id"];
 
 const queueLabels: Record<FollowUpQueue, string> = {
   JATUH_TEMPO: "Jatuh tempo",
@@ -39,17 +35,22 @@ export default async function PesanPage({ searchParams }: { searchParams: Search
   const staff = await requireStaffPage();
   const params = await searchParams;
   const value = typeof params.tab === "string" ? params.tab : "antrean";
-  const tab: Tab = tabs.find(({ id }) => id === value)?.id ?? "antrean";
+  const visibleTabs = visibleMessageTabs(staff.role);
+  const tab: MessageTab = resolveMessageTab(staff.role, value);
+  const queueValue = typeof params.queue === "string" ? params.queue : "";
+  const queue = (FOLLOWUP_QUEUES as readonly string[]).includes(queueValue)
+    ? queueValue as FollowUpQueue
+    : FOLLOWUP_QUEUES[0];
   const status = typeof params.status === "string" ? params.status : undefined;
   const detail = typeof params.count === "string" ? params.count : typeof params.detail === "string" ? params.detail : undefined;
   return (
     <div className="page-content">
       <PageHeader eyebrow="OPERASIONAL · PESAN" title="Pesan & tindak lanjut" description="Kelola antrean pelanggan dan tinjau catatan simulasi pesan." />
-      <Notice status={status} detail={detail} />
-      <nav className="tabs" aria-label="Tab pesan">{tabs.map(({ id, label }) =>
+      <Notice status={status} detail={detail} requiredStage={params.stage === "3" || params.tab === "reminder" ? 3 : 2} />
+      <nav className="tabs" aria-label="Tab pesan">{visibleTabs.map(({ id, label }) =>
         <Link className={`tab${tab === id ? " active" : ""}`} href={`/pesan?tab=${id}`} key={id}>{label}</Link>,
       )}</nav>
-      {tab === "antrean" && <FollowUpTab staff={staff} />}
+      {tab === "antrean" && <FollowUpTab staff={staff} selectedQueue={queue} />}
       {tab === "reminder" && <ReminderTab searchParams={params} />}
       {tab === "notifikasi" && <NotificationTab searchParams={Promise.resolve(params)} />}
       {tab === "log" && <ReminderLogTab staff={staff} />}
@@ -57,26 +58,47 @@ export default async function PesanPage({ searchParams }: { searchParams: Search
   );
 }
 
-async function FollowUpTab({ staff }: { staff: { role: string; branchId: string | null } }) {
+async function FollowUpTab({ staff, selectedQueue }: {
+  staff: { role: string; branchId: string | null };
+  selectedQueue: FollowUpQueue;
+}) {
   const queues = await getFollowUpQueues({ branchId: staff.role === "OWNER" ? null : staff.branchId });
+  const rows = queues[selectedQueue];
   return <div className="followup-queues">
-    {FOLLOWUP_QUEUES.map((queue) => <section className="table-card" key={queue}>
-      <div className="table-titlebar"><div><h2>{queueLabels[queue]}</h2><p>{queues[queue].length} pelanggan untuk ditindaklanjuti.</p></div></div>
+    <nav className="followup-queue-nav" aria-label="Jenis antrean tindak lanjut">
+      {FOLLOWUP_QUEUES.map((queue) => <Link
+        className={`followup-queue-link${selectedQueue === queue ? " active" : ""}`}
+        href={`/pesan?tab=antrean&queue=${queue}`}
+        key={queue}
+        aria-current={selectedQueue === queue ? "page" : undefined}
+      >{queueLabels[queue]} <span>{queues[queue].length}</span></Link>)}
+    </nav>
+    <section className="table-card">
+      <div className="table-titlebar"><div><h2>{queueLabels[selectedQueue]}</h2><p>{rows.length} pelanggan untuk ditindaklanjuti.</p></div></div>
       <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>SEGMEN</th><th>ALASAN</th><th>TRANSAKSI TERAKHIR</th><th>PERSETUJUAN</th><th>AKSI</th></tr></thead><tbody>
-        {queues[queue].map((row) => <tr key={row.customerId}>
+        {rows.map((row) => <tr key={row.customerId}>
           <td><Link href={`/pelanggan/${encodeURIComponent(row.customerId)}`}>{row.customerName}</Link></td>
           <td>{row.segment}</td><td>{row.reason}</td>
           <td>{row.lastTransactionAt ? new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeZone: "Asia/Jakarta" }).format(row.lastTransactionAt) : "Belum pernah"}</td>
           <td>{row.optedOut ? "Opt-out" : row.marketingConsent ? "Setuju" : "Belum setuju"}</td>
-          <td><form action={markFollowedUp} className="inline-form">
-            <input type="hidden" name="customerId" value={row.customerId} /><input type="hidden" name="queue" value={queue} />
-            <input name="note" maxLength={FOLLOWUP_NOTE_MAX_LENGTH} placeholder="Catatan opsional" aria-label={`Catatan tindak lanjut ${row.customerName}`} />
-            <button className="inline-action" type="submit">Tandai sudah dihubungi</button>
-          </form></td>
+          <td><div className="followup-row-actions">
+            {row.optedOut
+              ? <span>Tidak dapat dihubungi</span>
+              : row.marketingConsent
+                ? <>
+                  <CopyMessageButton message={followUpMessage(selectedQueue, row.customerName)} />
+                  <form action={markFollowedUp} className="inline-form">
+                    <input type="hidden" name="customerId" value={row.customerId} /><input type="hidden" name="queue" value={selectedQueue} />
+                    <input name="note" maxLength={FOLLOWUP_NOTE_MAX_LENGTH} placeholder="Catatan opsional" aria-label={`Catatan tindak lanjut ${row.customerName}`} />
+                    <button className="inline-action" type="submit">Tandai sudah dihubungi</button>
+                  </form>
+                </>
+                : <Link className="inline-action" href={`/pelanggan/${encodeURIComponent(row.customerId)}#persetujuan`}>Catat persetujuan</Link>}
+          </div></td>
         </tr>)}
-        {!queues[queue].length && <tr><td className="table-empty" colSpan={6}>Belum ada data pada antrean ini.</td></tr>}
+        {!rows.length && <tr><td className="table-empty" colSpan={6}>Belum ada data pada antrean ini.</td></tr>}
       </tbody></table></div>
-    </section>)}
+    </section>
   </div>;
 }
 
@@ -89,7 +111,7 @@ async function ReminderTab({ searchParams }: { searchParams: Record<string, stri
     include: { _count: { select: { logs: true } } },
   });
   const editing = templates.find(({ id }) => id === editId);
-  if (!enabled) return <div className="warning-callout">Fitur belum aktif di tahap roll-out cabang ini.</div>;
+  if (!enabled) return <div className="warning-callout">Fitur belum aktif: tahap roll-out belum mencapai tahap 3.</div>;
   return <div className="management-grid">
     <section className="form-card">
       <h2>{editing ? "Ubah template reminder" : "Buat template reminder"}</h2>

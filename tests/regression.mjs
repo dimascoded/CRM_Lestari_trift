@@ -23,7 +23,7 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT, ACQUISITION_CHANNELS, SEGMENTS }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent, recordCashierConsentRecord }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders, personalSchedule }, { confirmStockTodayRecord }, { getKpis }, { getCustomerSegment }, { featureEnabledForBranch, reminderEnabled, setBranchRolloutStageRecord }, { FOLLOWUP_QUEUES, getFollowUpQueues, markFollowedUpRecord }, { getDashboardSummary }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, REDEMPTION_DISCOUNT_PERCENT, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT, ACQUISITION_CHANNELS, SEGMENTS }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent, recordCashierConsentRecord }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders, personalSchedule }, { confirmStockTodayRecord }, { getKpis }, { getCustomerSegment }, { featureEnabled, reminderEnabled, setBranchRolloutStageRecord }, { FOLLOWUP_QUEUES, getFollowUpQueues, markFollowedUpRecord }, { getDashboardSummary }, { followUpMessage }, { visibleMessageTabs, resolveMessageTab }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
   import("../src/lib/password.ts"),
@@ -39,6 +39,8 @@ const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, MESSAGE_CONSENT_POLIC
   import("../src/lib/rollout.ts"),
   import("../src/lib/followup-service.ts"),
   import("../src/lib/dashboard-service.ts"),
+  import("../src/lib/followup-messages.ts"),
+  import("../src/lib/message-tabs.ts"),
 ]);
 process.env.ROLLOUT_GATING = "off";
 
@@ -84,6 +86,24 @@ test("message status is unified and always labeled as simulation", async () => {
     isSimulated: false,
     label: "Status tidak dikenal (simulasi): SENT",
   });
+});
+
+test("message tabs hide reminders from cashier and stock staff without redirecting", async () => {
+  for (const role of ["CASHIER", "STOCK_STAFF"]) {
+    const tabs = visibleMessageTabs(role);
+    assert.deepEqual(tabs.map(({ id }) => id), ["antrean", "notifikasi", "log"]);
+    assert.equal(resolveMessageTab(role, "reminder"), "antrean");
+    assert.equal(resolveMessageTab(role, "notifikasi"), "notifikasi");
+  }
+  assert.equal(visibleMessageTabs("MARKETING").some(({ id }) => id === "reminder"), true);
+  assert.equal(resolveMessageTab("MANAGER", "reminder"), "reminder");
+});
+
+test("follow-up message templates use the first name and current redemption discount", async () => {
+  assert.equal(followUpMessage("JATUH_TEMPO", "Dinda Putri"), "Halo Dinda, sudah waktunya cek koleksi baru Lestari Thrift. Ada stok baru yang mungkin cocok untukmu.");
+  assert.equal(followUpMessage("SATU_STAMP", "Dinda Putri"), `Halo Dinda, tinggal 1 stamp lagi untuk dapat diskon ${REDEMPTION_DISCOUNT_PERCENT}% di semua cabang Lestari Thrift.`);
+  assert.equal(followUpMessage("TIDAK_AKTIF", "Dinda Putri"), "Halo Dinda, kami kangen! Ada koleksi baru di Lestari Thrift yang mungkin kamu suka.");
+  assert.equal(followUpMessage("WISHLIST_BELUM", "Dinda Putri"), "Halo Dinda, ada barang yang cocok dengan wishlist kamu di Lestari Thrift.");
 });
 
 test("user provisioning refuses non-interactive execution without creating an account", async () => {
@@ -781,17 +801,48 @@ test("follow-up queues include due reminders, one-stamp, inactive, and unmatched
   assert.ok(stock.id);
 });
 
-test("rollout limits wishlist and reminders unless demo gating is disabled", async () => {
+test("global rollout gates use the highest branch stage unless demo gating is disabled", async () => {
   process.env.ROLLOUT_GATING = "on";
-  assert.equal(featureEnabledForBranch("wishlist", { rolloutStage: 1 }), false);
-  assert.equal(featureEnabledForBranch("stockNotification", { rolloutStage: 2 }), true);
   const originalStages = await db.branch.findMany({ select: { id: true, rolloutStage: true } });
-  await db.branch.updateMany({ data: { rolloutStage: 2 } });
   try {
+    await db.branch.updateMany({ data: { rolloutStage: 1 } });
+    assert.equal(await featureEnabled("wishlist"), false);
+    assert.equal(await featureEnabled("stockNotification"), false);
+    assert.equal(await featureEnabled("reminder"), false);
+
+    await db.branch.update({ where: { id: branches[1].id }, data: { rolloutStage: 2 } });
+    assert.equal(await featureEnabled("wishlist"), true);
+    assert.equal(await featureEnabled("stockNotification"), true);
     assert.equal(await reminderEnabled(), false);
+    assert.equal(await featureEnabled("reminder"), false);
     assert.equal(await processDueReminders(), 0);
+
+    const stageOneCustomer = await customer("Pelanggan Terdaftar Tahap Satu");
+    const registration = await db.customer.findUnique({
+      where: { id: stageOneCustomer.id },
+      select: { registeredAt: { select: { rolloutStage: true } } },
+    });
+    assert.equal(registration?.registeredAt.rolloutStage, 1);
+    const stageOneStock = await db.stockItem.create({
+      data: { name: "Kemeja Tahap Satu", category: "Atasan", size: "M", branchId: branches[0].id },
+    });
+    const stageOneWishlist = await db.wishlist.create({
+      data: { customerId: stageOneCustomer.id, category: "Atasan", size: "M" },
+    });
+    assert.equal(await db.$transaction((tx) => featureEnabled("wishlist", tx)), true);
+    assert.equal(await db.$transaction((tx) => matchWishlist(tx, stageOneWishlist)), 1);
+    assert.equal(await db.stockMatchNotification.count({ where: { customerId: stageOneCustomer.id } }), 1);
+    assert.ok(stageOneStock.id);
+
+    await db.branch.update({ where: { id: branches[3].id }, data: { rolloutStage: 3 } });
+    assert.equal(await featureEnabled("reminder"), true);
+    assert.equal(await reminderEnabled(), true);
+
     process.env.ROLLOUT_GATING = "off";
-    assert.equal(featureEnabledForBranch("wishlist", { rolloutStage: 1 }), true);
+    await db.branch.updateMany({ data: { rolloutStage: 1 } });
+    assert.equal(await featureEnabled("wishlist"), true);
+    assert.equal(await featureEnabled("stockNotification"), true);
+    assert.equal(await featureEnabled("reminder"), true);
     assert.equal(await reminderEnabled(), true);
   } finally {
     for (const branch of originalStages) {

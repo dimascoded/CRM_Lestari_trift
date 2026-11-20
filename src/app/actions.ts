@@ -36,7 +36,7 @@ import { matchStockItem, matchWishlist } from "@/lib/wishlist-match";
 import { processDueReminders } from "@/lib/reminders";
 import { confirmStockTodayRecord } from "@/lib/stock-service";
 import { recordTransactionRecord, voidTransactionRecord } from "@/lib/transaction-service";
-import { featureEnabledForBranch, reminderEnabled, setBranchRolloutStageRecord } from "@/lib/rollout";
+import { featureEnabled, reminderEnabled, setBranchRolloutStageRecord } from "@/lib/rollout";
 import { FOLLOWUP_QUEUES, markFollowedUpRecord } from "@/lib/followup-service";
 
 function formText(formData: FormData, name: string) {
@@ -595,9 +595,9 @@ export async function createWishlist(formData: FormData) {
   const keyword = formText(formData, "keyword");
   const registeredCustomer = await db.customer.findUnique({
     where: { id: customerId },
-    select: { registeredAt: { select: { rolloutStage: true } } },
+    select: { id: true },
   });
-  if (!registeredCustomer || !featureEnabledForBranch("wishlist", registeredCustomer.registeredAt)) {
+  if (!registeredCustomer || !(await featureEnabled("wishlist"))) {
     redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
   }
   const validCategory = !category || (STOCK_CATEGORIES as readonly string[]).includes(category);
@@ -624,9 +624,9 @@ export async function updateWishlist(formData: FormData) {
   const keyword = formText(formData, "keyword");
   const registeredCustomer = await db.customer.findUnique({
     where: { id: customer.id },
-    select: { registeredAt: { select: { rolloutStage: true } } },
+    select: { id: true },
   });
-  if (!registeredCustomer || !featureEnabledForBranch("wishlist", registeredCustomer.registeredAt)) {
+  if (!registeredCustomer || !(await featureEnabled("wishlist"))) {
     redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
   }
   const validCategory = !category || (STOCK_CATEGORIES as readonly string[]).includes(category);
@@ -656,9 +656,9 @@ export async function deleteWishlist(formData: FormData) {
   if (!wishlistId) redirect("/portal?tab=wishlist&status=invalid-wishlist-id");
   const owned = await db.wishlist.findFirst({
     where: { id: wishlistId, customerId: customer.id },
-    select: { customer: { select: { registeredAt: { select: { rolloutStage: true } } } } },
+    select: { id: true },
   });
-  if (owned && !featureEnabledForBranch("wishlist", owned.customer.registeredAt)) {
+  if (owned && !(await featureEnabled("wishlist"))) {
     redirect("/portal?tab=wishlist&status=rollout-feature-disabled");
   }
   const deleted = await db.wishlist.deleteMany({ where: { id: wishlistId, customerId: customer.id } });
@@ -828,7 +828,7 @@ export async function updateStockNotificationTemplate(formData: FormData) {
 
 export async function setReminderTemplateActive(formData: FormData) {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
-  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled&stage=3");
   const templateId = formText(formData, "templateId");
   const activeValue = formText(formData, "active");
   if (!templateId || !["true", "false"].includes(activeValue)) {
@@ -881,7 +881,7 @@ export async function deleteReminderTemplate(formData: FormData) {
 
 export async function sendReminderCampaign(formData: FormData) {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
-  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled&stage=3");
   const templateId = formText(formData, "templateId");
   if (!templateId) redirect("/pesan?tab=reminder&status=invalid-template-id");
   const template = await db.reminderTemplate.findUnique({ where: { id: templateId } });
@@ -901,7 +901,7 @@ export async function sendReminderCampaign(formData: FormData) {
 
 export async function runReminderScheduler() {
   const staff = await requireStaff(["OWNER", "MANAGER", "MARKETING"]);
-  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled");
+  if (!(await reminderEnabled())) redirect("/pesan?tab=reminder&status=rollout-feature-disabled&stage=3");
   const sentCount = await processDueReminders();
   await recordAuditEvent({
     userId: staff.id,

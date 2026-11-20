@@ -47,7 +47,7 @@ OWNER dapat meninjau halaman Jejak Audit dalam mode baca-saja untuk aktivitas st
 - [ ] Sistem menerapkan satu catatan simulasi per pelanggan dalam cooldown gabungan tujuh hari untuk reminder dan notifikasi wishlist. Jangan membuat catatan/pesan manual untuk mengakali cooldown.
 - [ ] Jalankan hanya template aktif yang sudah ditinjau dan sudah jatuh tempo. Reminder personal dijadwalkan pukul 09.00 Asia/Jakarta pada hari lead time. Tinjau jumlah penerima dan contoh isi sebelum demo.
 - [ ] Catat hasil sebagai **simulasi**. Status pada aplikasi bukan bukti delivery, pembacaan, atau konversi akibat pesan.
-- [ ] Gunakan antrean `/pesan?tab=antrean` untuk tindak lanjut; pelanggan yang baru ditandai dihubungi disembunyikan tujuh hari.
+- [ ] Gunakan antrean `/pesan?tab=antrean` untuk tindak lanjut; pilih satu jenis antrean dan periksa persetujuan sebelum menghubungi. Tombol salin hanya menyalin teks dan tidak mengirim pesan; kirim manual di luar aplikasi. Pelanggan yang baru ditandai dihubungi disembunyikan tujuh hari.
 - [ ] Hentikan tindak lanjut pesan saat pelanggan mencabut persetujuan; laporkan permintaan dan masalah consent kepada manajer/marketing.
 
 ## 3. Pelatihan dan adopsi perubahan
@@ -107,8 +107,8 @@ Project Manager menyiapkan ringkasan dan Steering Committee meninjau:
 - **S2:** persentase cabang yang memiliki uji tukar stamp dan hasil uji terakhir/lulus; bila ada cabang belum diuji, nilai KPI 0 dan nama cabang ditampilkan.
 - **S4:** pasangan cabang-hari dalam tujuh hari yang memiliki log perubahan katalog atau konfirmasi dengan jumlah fisik terisi, dibagi seluruh pasangan cabang-hari.
 - **S6:** simulasi reminder yang tercatat dalam ±60 menit dari jadwal dibagi simulasi yang memiliki jadwal. Semua pesan tetap simulasi.
-- Scheduler lokal opsional hanya berjalan dengan `ENABLE_LOCAL_SCHEDULER=true`, setiap 15 menit; default nonaktif. `ROLLOUT_GATING=off` hanya untuk demo dan melewati gerbang fitur per cabang.
-- Minimum transaksi stamp adalah Rp100.000. Fitur wishlist/notifikasi aktif mulai tahap 2; reminder aktif setelah cabang dengan tahap tertinggi mencapai tahap 3.
+- Scheduler lokal opsional hanya berjalan dengan `ENABLE_LOCAL_SCHEDULER=true`, setiap 15 menit; default nonaktif. `ROLLOUT_GATING=off` hanya untuk demo dan melewati gerbang fitur global.
+- Minimum transaksi stamp adalah Rp100.000. Wishlist dan notifikasi stok aktif bila ada cabang tahap 2 atau lebih; reminder aktif bila ada cabang tahap 3.
 
 Simpan keputusan rapat, metrik yang digunakan, definisi/periode pengukuran, dan tindakan tindak lanjut. Tinjau business case setelah enam bulan memakai baseline enam bulan sebelum rollout; data seed bukan baseline operasional.
 

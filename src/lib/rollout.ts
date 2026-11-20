@@ -1,21 +1,20 @@
+import type { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { writeAuditLog } from "./audit-service";
 
-export const FEATURE_MIN_STAGE = { wishlist: 2, stockNotification: 2 } as const;
+export const FEATURE_MIN_STAGE = { wishlist: 2, stockNotification: 2, reminder: 3 } as const;
 export type RolloutFeature = keyof typeof FEATURE_MIN_STAGE;
 
-export function featureEnabledForBranch(
-  feature: RolloutFeature,
-  branch: { rolloutStage: number },
-) {
+type RolloutClient = Pick<Prisma.TransactionClient, "branch">;
+
+export async function featureEnabled(feature: RolloutFeature, client: RolloutClient = db) {
   if (process.env.ROLLOUT_GATING === "off") return true;
-  return branch.rolloutStage >= FEATURE_MIN_STAGE[feature];
+  const highest = await client.branch.aggregate({ _max: { rolloutStage: true } });
+  return (highest._max.rolloutStage ?? 0) >= FEATURE_MIN_STAGE[feature];
 }
 
 export async function reminderEnabled() {
-  if (process.env.ROLLOUT_GATING === "off") return true;
-  const highest = await db.branch.aggregate({ _max: { rolloutStage: true } });
-  return (highest._max.rolloutStage ?? 0) >= 3;
+  return featureEnabled("reminder");
 }
 
 export async function setBranchRolloutStageRecord({

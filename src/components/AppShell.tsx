@@ -40,12 +40,10 @@ export function AppShell({
   children,
   role,
   userName,
-  branchCount,
 }: {
   children: ReactNode;
   role: Role;
   userName: string;
-  branchCount: number;
 }) {
   const pathname = usePathname();
   const navigation = allNavigation.filter(({ href }) => menuByRole[role].includes(href));
@@ -61,12 +59,6 @@ export function AppShell({
           <span className="brand-mark">L</span>
           <span className="brand-copy"><strong>lestari</strong><small>THRIFT CRM</small></span>
         </Link>
-        <div className="workspace-label">WORKSPACE</div>
-        <div className="workspace-picker">
-          <span className="workspace-avatar">LT</span>
-          <span><strong>Lestari Thrift</strong><small>{branchCount} cabang terhubung</small></span>
-          <span className="chevron">⌄</span>
-        </div>
         <nav className="side-nav" aria-label="Navigasi utama">
           {navigation.map((item, index) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -82,12 +74,6 @@ export function AppShell({
           })}
         </nav>
         <div className="sidebar-bottom">
-          <div className="support-card">
-            <span className="support-icon">✳</span>
-            <strong>Butuh bantuan?</strong>
-            <p>Hubungi tim support Lestari.</p>
-            <a href="mailto:halo@lestarithrift.id">Hubungi kami <span>↗</span></a>
-          </div>
           <div className="user-profile">
             <div className="user-avatar">{roleLabels[role].slice(0, 2).toUpperCase()}</div>
             <div><strong>{userName}</strong><small>{roleLabels[role]}</small></div>
@@ -99,7 +85,6 @@ export function AppShell({
         <header className="topbar">
           <div className="breadcrumb"><span>Lestari Thrift</span><b>/</b><strong>{currentPage?.label ?? "CRM"}</strong></div>
           <div className="topbar-actions">
-            <span className="live-status"><i /> {branchCount} cabang terhubung</span>
             <span className="signed-in-user">{userName}</span>
           </div>
         </header>

@@ -9,7 +9,7 @@ import {
 } from "./business-rules";
 import { personalSchedule } from "./reminders";
 import { getCustomerSegment } from "./segment-service";
-import { featureEnabledForBranch } from "./rollout";
+import { featureEnabled } from "./rollout";
 import { writeAuditLog } from "./audit-service";
 
 export const FOLLOWUP_QUEUES = ["JATUH_TEMPO", "SATU_STAMP", "TIDAK_AKTIF", "WISHLIST_BELUM"] as const;
@@ -88,10 +88,9 @@ export async function getFollowUpQueues({
   });
   const customerIds = customers.map(({ id }) => id);
   const hideAfter = daysBefore(FOLLOWUP_HIDE_DAYS, now);
-  const [availableItems, hiddenNotes, reminderLogs, stockNotifications] = await Promise.all([
+  const [availableItems, hiddenNotes, reminderLogs, stockNotifications, stockNotificationEnabled] = await Promise.all([
     db.stockItem.findMany({
       where: { status: "AVAILABLE" },
-      include: { branch: { select: { rolloutStage: true } } },
     }),
     db.followUpNote.findMany({
       where: { customerId: { in: customerIds }, createdAt: { gte: hideAfter } },
@@ -105,6 +104,7 @@ export async function getFollowUpQueues({
       where: { customerId: { in: customerIds } },
       select: { customerId: true, stockItemId: true, sentAt: true },
     }),
+    featureEnabled("stockNotification"),
   ]);
   const hidden = new Set(hiddenNotes.map(({ customerId: id, queue }) => `${id}:${queue}`));
   const queues: Record<FollowUpQueue, FollowUpRow[]> = {
@@ -148,7 +148,7 @@ export async function getFollowUpQueues({
     }
 
     const matchingItems = availableItems.filter((item) =>
-      featureEnabledForBranch("stockNotification", item.branch) &&
+      stockNotificationEnabled &&
       customer.wishlists.some((wishlist) => matchesWishlist(wishlist, item)),
     );
     const missingItem = matchingItems.find((item) =>
