@@ -150,7 +150,8 @@ export async function updateCustomerRecord(formData: FormData) {
   const birthDateValue = formText(formData, "birthDate");
   const instagram = formText(formData, "instagram");
   if (!customerId || !name || name.length > 100 || !/^\+?\d{9,15}$/.test(whatsapp)) {
-    redirect("/pelanggan?status=invalid-customer");
+    if (!customerId) redirect("/pelanggan?status=invalid-customer");
+    redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=invalid-customer#profil`);
   }
   const customer = await db.customer.findUnique({
     where: { id: customerId },
@@ -164,7 +165,7 @@ export async function updateCustomerRecord(formData: FormData) {
     favoriteCategory.length > 80 ||
     favoriteSize.length > 40 ||
     instagram.length > 100
-  ) redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=invalid-customer`);
+  ) redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=invalid-customer#profil`);
 
   const duplicate = await db.customer.findUnique({ where: { whatsapp }, select: { id: true } });
   if (duplicate && duplicate.id !== customerId) {
@@ -172,7 +173,7 @@ export async function updateCustomerRecord(formData: FormData) {
       data: { attemptedName: name, branchId: customer.registeredAtId, existingCustomerId: duplicate.id },
     });
     revalidatePath("/laporan");
-    redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate`);
+    redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate#profil`);
   }
 
   try {
@@ -199,7 +200,7 @@ export async function updateCustomerRecord(formData: FormData) {
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate`);
+      redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=duplicate#profil`);
     }
     throw error;
   }
@@ -207,7 +208,7 @@ export async function updateCustomerRecord(formData: FormData) {
   revalidatePath("/pelanggan");
   revalidatePath("/kasir");
   revalidatePath("/portal");
-  redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=customer-updated`);
+  redirect(`/pelanggan/${encodeURIComponent(customerId)}?status=customer-updated#profil`);
 }
 
 export async function recordCashierConsent(formData: FormData) {

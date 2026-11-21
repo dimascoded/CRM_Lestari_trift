@@ -11,6 +11,7 @@
     "db:push": "prisma db push",
     "db:seed": "node --experimental-strip-types prisma/seed.mjs",
     "db:setup": "prisma migrate dev && node --experimental-strip-types prisma/seed.mjs",
+    "db:check-demo": "node --disable-warning=ExperimentalWarning --experimental-strip-types --experimental-loader ./tests/ts-loader.mjs scripts/check-demo-data.mjs",
     "user:create": "node --disable-warning=ExperimentalWarning --experimental-strip-types --experimental-loader ./tests/ts-loader.mjs scripts/create-user.mjs",
     "test:regression": "node --disable-warning=ExperimentalWarning --experimental-strip-types --experimental-loader ./tests/ts-loader.mjs tests/regression.mjs"
   },

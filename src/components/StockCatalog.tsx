@@ -34,7 +34,7 @@ export async function StockCatalog({ category = "", size = "", branch = "", acti
           <select id="catalog-size" name="size" defaultValue={size}><option value="">Semua ukuran</option>{sizeRows.map(({ size: value }) => <option key={value} value={value}>{value}</option>)}</select>
           <label className="visually-hidden" htmlFor="catalog-branch">Cabang</label>
           <select id="catalog-branch" name="branch" defaultValue={branch}><option value="">Semua cabang</option>{branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-          <button className="button secondary" type="submit">Terapkan filter</button>
+          <button className="button" type="submit">Terapkan filter</button>
         </form>
       </section>
       <section className="catalog-grid section-spacer" aria-label="Barang tersedia">

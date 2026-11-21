@@ -81,7 +81,7 @@ export default async function CustomerDetailPage({ params, searchParams }: Props
       <button className="button small" type="submit">Catat persetujuan</button>
     </form>}
 
-    <section className="form-card section-spacer">
+    <section id="profil" className="form-card section-spacer profile-section">
       <h2>Profil dan asal pelanggan</h2>
       <form action={updateCustomerRecord}>
         <input type="hidden" name="customerId" value={customer.id} />

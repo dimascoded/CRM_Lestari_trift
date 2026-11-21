@@ -87,7 +87,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
               <p>{branchCountMap.get(branch.id) ?? 0} barang tersedia</p>
               <small>Perubahan katalog terakhir: {lastChange ? new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(lastChange) : "Belum ada"}</small>
               <small>Konfirmasi stok: {confirmedToday ? "Sudah dicatat hari ini" : "Belum dicatat hari ini"}</small>
-              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><label className="field">Jumlah barang fisik<input name="countedItems" type="number" min="0" step="1" required /></label><button className="button small secondary" type="submit">{confirmedToday ? "Catat konfirmasi ulang" : "Konfirmasi stok hari ini"}</button></form>
+              <form action={confirmStockToday}><input type="hidden" name="branchId" value={branch.id} /><label className="field">Jumlah barang fisik<input name="countedItems" type="number" min="0" step="1" required /></label>              <button className="button small" type="submit">{confirmedToday ? "Catat konfirmasi ulang" : "Konfirmasi stok hari ini"}</button></form>
             </article>
           );
         })}
@@ -106,7 +106,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
               <select name="category" defaultValue={category} aria-label="Filter kategori"><option value="">Semua kategori</option>{categories.map((itemCategory) => <option key={itemCategory}>{itemCategory}</option>)}</select>
               <select name="branch" defaultValue={branchId} aria-label="Filter cabang"><option value="">Semua cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
               <select name="itemStatus" defaultValue={itemStatus} aria-label="Filter status barang"><option value="">Semua status</option><option value="AVAILABLE">Tersedia</option><option value="SOLD">Terjual</option><option value="REMOVED">Diarsipkan</option></select>
-              <button className="button secondary" type="submit">Filter</button>
+              <button className="button" type="submit">Terapkan filter</button>
             </form>
           </div>
           <div className="table-scroll"><table><thead><tr><th>BARANG</th><th>KATEGORI</th><th>UKURAN</th><th>CABANG</th><th>MASUK</th><th>STATUS</th><th>AKSI</th></tr></thead>

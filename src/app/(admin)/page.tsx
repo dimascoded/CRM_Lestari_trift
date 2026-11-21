@@ -38,7 +38,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     <form className="dashboard-filter" method="get">
       <label>Periode<select name="period" defaultValue={String(period)}>{DASHBOARD_PERIOD_DAYS.map((days) => <option value={days} key={days}>{days} hari</option>)}</select></label>
       {staff.role === "OWNER" && <label>Cabang<select name="branch" defaultValue={branchId ?? ""}><option value="">Semua cabang</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
-      <button className="button secondary" type="submit">Terapkan filter</button>
+      <button className="button" type="submit">Terapkan filter</button>
     </form>
     <nav className="anchor-nav" aria-label="Lompat ke bagian dashboard">
       {[["#ringkasan", "Ringkasan"], ["#penjualan", "Penjualan"], ["#pelanggan", "Pelanggan"], ["#wishlist", "Wishlist"], ["#stok", "Stok"], ["#pesan", "Pesan"], ["#kpi", "KPI"]].map(([href, label]) =>

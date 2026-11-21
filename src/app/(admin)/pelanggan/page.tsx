@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { setCustomerActive, updateCustomerRecord } from "@/app/actions";
+import { setCustomerActive } from "@/app/actions";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
@@ -23,7 +23,6 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
   const requestedSegment = typeof params.segment === "string" ? params.segment : "";
   const segmentFilter = (Object.values(SEGMENTS) as string[]).includes(requestedSegment) ? requestedSegment : "";
   const status = typeof params.status === "string" ? params.status : undefined;
-  const editId = typeof params.edit === "string" ? params.edit : "";
   const requestedPage = Number(params.page);
   const safePage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const where = {
@@ -63,21 +62,12 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
   const totalCount = filteredCustomers.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
   const page = Math.min(safePage, pageCount);
-  const [customers, candidateEdit] = await Promise.all([
-    Promise.resolve(filteredCustomers.slice((page - 1) * pageSize, page * pageSize)),
-    staff.role !== "CASHIER" && editId
-      ? db.customer.findUnique({ where: { id: editId }, include: { registeredAt: true } })
-      : Promise.resolve(null),
-  ]);
+  const customers = filteredCustomers.slice((page - 1) * pageSize, page * pageSize);
   const canManage = staff.role === "OWNER" || staff.role === "MANAGER";
-  const editCustomer = candidateEdit && (staff.role === "OWNER" || candidateEdit.registeredAtId === staff.branchId)
-    ? candidateEdit
-    : null;
   const queryParams = new URLSearchParams();
   if (query) queryParams.set("q", query);
   queryParams.set("archived", archived ? "1" : "0");
   if (segmentFilter) queryParams.set("segment", segmentFilter);
-  const listUrl = `/pelanggan?${queryParams.toString()}`;
   const pageUrl = (pageNumber: number) => {
     const nextParams = new URLSearchParams(queryParams);
     if (pageNumber > 1) nextParams.set("page", String(pageNumber));
@@ -91,25 +81,6 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
     <div className="page-content">
       <PageHeader eyebrow="OPERASIONAL · PELANGGAN" title="Database pelanggan" description="Cari, perbarui, dan arsipkan profil tanpa menghapus riwayat transaksi atau persetujuan." />
       <Notice status={status} />
-      {editId && !editCustomer && <Notice status={candidateEdit ? "customer-forbidden" : "customer-not-found"} />}
-      {editCustomer && (
-        <section className="form-card section-spacer">
-          <h2>Ubah profil pelanggan</h2>
-          <p>Riwayat transaksi, stamp, dan persetujuan pesan tidak berubah.</p>
-          <form action={updateCustomerRecord}>
-            <input type="hidden" name="customerId" value={editCustomer.id} />
-            <div className="form-grid">
-              <div className="field"><label htmlFor="edit-customer-name">Nama pelanggan</label><input id="edit-customer-name" name="name" required maxLength={100} defaultValue={editCustomer.name} autoComplete="name" /></div>
-              <div className="field"><label htmlFor="edit-customer-whatsapp">Nomor WhatsApp</label><input id="edit-customer-whatsapp" name="whatsapp" type="tel" inputMode="tel" autoComplete="tel" required maxLength={18} defaultValue={editCustomer.whatsapp} /></div>
-            </div>
-            <p className="field-hint">Terdaftar di {editCustomer.registeredAt.name}. Perubahan nomor harus dikonfirmasi pelanggan.</p>
-            <div className="form-actions">
-              <button className="button" type="submit">Simpan perubahan</button>
-              <Link className="button secondary" href={listUrl}>Batal</Link>
-            </div>
-          </form>
-        </section>
-      )}
       <section className="table-card section-spacer">
         <div className="table-titlebar">
           <div><h2>{archived ? "Pelanggan diarsipkan" : "Pelanggan aktif"}</h2><p>{totalCount} pelanggan{query ? ` cocok dengan “${query}”` : ""}.</p></div>
@@ -118,15 +89,13 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
               <input type="hidden" name="archived" value={archived ? "1" : "0"} />
               <input className="search-input" type="search" name="q" defaultValue={query} placeholder="Cari nama atau WhatsApp..." aria-label="Cari pelanggan" />
               <select name="segment" defaultValue={segmentFilter} aria-label="Filter segmen"><option value="">Semua segmen</option>{Object.entries(SEGMENTS).map(([key, label]) => <option value={label} key={key}>{label}</option>)}</select>
-              <button className="button secondary" type="submit">Cari</button>
+              <button className="button" type="submit">Cari</button>
             </form>
             <Link className="button secondary" href={`/pelanggan?${archiveUrl.toString()}`}>{archived ? "Lihat pelanggan aktif" : "Lihat arsip"}</Link>
           </div>
         </div>
         <div className="table-scroll"><table><thead><tr><th>PELANGGAN</th><th>SEGMEN</th><th>DAFTAR DI</th><th>STAMP AKTIF</th><th>TRANSAKSI</th><th>WISHLIST</th><th>PESAN</th><th>STATUS</th>{canManage && <th>AKSI</th>}</tr></thead>
           <tbody>{customers.map((customer) => {
-            const actionParams = new URLSearchParams(queryParams);
-            actionParams.set("edit", customer.id);
             return (
               <tr key={customer.id}>
                 <td><div className="customer-cell"><span className="customer-initial">{customer.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</span><span><Link href={`/pelanggan/${encodeURIComponent(customer.id)}`}><strong>{customer.name}</strong></Link><small>{customer.whatsapp} · {customer.acquisitionChannel}</small></span></div></td>
@@ -139,7 +108,7 @@ async function CustomersContent({ searchParams }: { searchParams: SearchParams }
                 <td><span className={`status ${customer.active ? "" : "neutral"}`}>{customer.active ? "Aktif" : "Diarsipkan"}</span></td>
                 {canManage && <td>{staff.role === "OWNER" || customer.registeredAtId === staff.branchId
                   ? <div className="customer-row-actions">
-                      <Link className="inline-action" href={`/pelanggan?${actionParams.toString()}`}>Ubah</Link>
+                      <Link className="inline-action" href={`/pelanggan/${encodeURIComponent(customer.id)}#profil`}>Ubah</Link>
                       <form action={setCustomerActive}>
                         <input type="hidden" name="customerId" value={customer.id} />
                         <input type="hidden" name="active" value={String(!customer.active)} />

@@ -77,6 +77,17 @@ test("staff passwords and customer login codes are not stored as plaintext", asy
   assert.equal(await verifyCustomerLoginCode("000000", codeHash), false);
 });
 
+test("customer edit navigation and primary action UI use detail anchors", async () => {
+  const customerPage = fs.readFileSync(path.join(root, "src/app/(admin)/pelanggan/page.tsx"), "utf8");
+  const detailPage = fs.readFileSync(path.join(root, "src/app/(admin)/pelanggan/[id]/page.tsx"), "utf8");
+  const kasirPage = fs.readFileSync(path.join(root, "src/app/(admin)/kasir/page.tsx"), "utf8");
+  assert.equal(customerPage.includes("?edit="), false);
+  assert.equal(customerPage.includes("/pelanggan/${encodeURIComponent(customer.id)}#profil"), true);
+  assert.equal(detailPage.includes('id="profil"'), true);
+  assert.equal(kasirPage.includes("Pelanggan dengan transaksi terbanyak"), true);
+  assert.equal(kasirPage.includes("registeredAtId"), true);
+});
+
 test("message status is unified and always labeled as simulation", async () => {
   assert.deepEqual(describeMessageStatus(SIMULATED_SENT_STATUS), {
     isSimulated: true,

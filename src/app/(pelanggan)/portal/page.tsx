@@ -182,12 +182,12 @@ async function PortalContent({ searchParams }: { searchParams: SearchParams }) {
               <div className="field"><label htmlFor="birth-date">Tanggal lahir</label><input id="birth-date" name="birthDate" type="date" defaultValue={customer.birthDate?.toISOString().slice(0, 10) ?? ""} /></div>
               <div className="field"><label htmlFor="instagram">Instagram</label><input id="instagram" name="instagram" defaultValue={customer.instagram ?? ""} placeholder="@username" /></div>
             </div>
-            <div className="form-actions"><button className="button secondary" type="submit">Simpan profil</button></div>
+            <div className="form-actions"><button className="button" type="submit">Simpan profil</button></div>
           </form>
           <div className="section-spacer">
             <form action={updateMessagePreference}>
               <label className="checkbox-field"><input type="checkbox" name="marketingConsent" defaultChecked={customer.marketingConsent && !customer.optedOut} /> Saya menyetujui pesan di atas.</label>
-              <div className="form-actions"><button className="button secondary" type="submit">Simpan persetujuan pesan</button></div>
+              <div className="form-actions"><button className="button" type="submit">Simpan persetujuan pesan</button></div>
             </form>
             <p className="field-hint profile-status">Status: {customer.marketingConsent && !customer.optedOut ? "setuju menerima pesan" : customer.optedOut ? "berhenti menerima pesan" : "belum menyetujui pesan"}</p>
           </div>

@@ -29,6 +29,7 @@ npm run test:regression
 ```
 
 `db:setup` menjalankan migration Prisma dan seed. Migration baseline di `prisma/migrations` menjaga database lama yang sebelumnya dibuat dengan `db push` tanpa perlu mereset data.
+Seed analisis membuat 90 pelanggan sintetis, transaksi lintas periode, stok, wishlist, reminder, penukaran stamp, dan log operasional secara deterministik. Jalankan `SEED_RESET=true npm run db:seed` hanya pada lingkungan pengembangan untuk membangun ulang data demo; perintah tidak diperbolehkan dengan `NODE_ENV=production`. Periksa hasil seed dengan `npm run db:check-demo`.
 
 ## Urutan pengembangan
 

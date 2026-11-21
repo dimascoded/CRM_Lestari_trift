@@ -109,6 +109,7 @@ Project Manager menyiapkan ringkasan dan Steering Committee meninjau:
 - **S6:** simulasi reminder yang tercatat dalam ±60 menit dari jadwal dibagi simulasi yang memiliki jadwal. Semua pesan tetap simulasi.
 - Scheduler lokal opsional hanya berjalan dengan `ENABLE_LOCAL_SCHEDULER=true`, setiap 15 menit; default nonaktif. `ROLLOUT_GATING=off` hanya untuk demo dan melewati gerbang fitur global.
 - Minimum transaksi stamp adalah Rp100.000. Wishlist dan notifikasi stok aktif bila ada cabang tahap 2 atau lebih; reminder aktif bila ada cabang tahap 3.
+- Seed demo untuk analisis berisi data sintetis deterministik: 90 pelanggan, transaksi lintas periode, 60 stok, wishlist, reminder, penukaran, dan log operasional. Gunakan `SEED_RESET=true` saat pengembangan untuk membangun ulang; jangan gunakan reset pada production. Jalankan `npm run db:check-demo` untuk memvalidasi invariants data.
 
 Simpan keputusan rapat, metrik yang digunakan, definisi/periode pengukuran, dan tindakan tindak lanjut. Tinjau business case setelah enam bulan memakai baseline enam bulan sebelum rollout; data seed bukan baseline operasional.
 

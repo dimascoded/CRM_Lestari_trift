@@ -40,7 +40,7 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
   const canVoid = staff.role === "OWNER" || staff.role === "MANAGER";
   const branches = await db.branch.findMany({ orderBy: { name: "asc" } });
   const staffBranch = branches.find(({ id }) => id === staff.branchId);
-  const [customers, selected, segmentTransactions] = await Promise.all([
+  const [customers, selected, segmentTransactions, topTransactionGroups] = await Promise.all([
     query
       ? db.customer.findMany({
           where: {
@@ -55,7 +55,7 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
           },
           orderBy: { name: "asc" },
           take: 10,
-          select: { id: true, name: true, whatsapp: true, registeredAt: { select: { name: true } } },
+          select: { id: true, name: true, whatsapp: true, registeredAtId: true, registeredAt: { select: { name: true } } },
         })
       : Promise.resolve([]),
     customerId
@@ -79,7 +79,36 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
           select: { createdAt: true },
         })
       : Promise.resolve([]),
+    !query && !customerId && !showNewCustomer
+      ? db.transaction.groupBy({
+          by: ["customerId"],
+          where: { voidRecord: null, customer: { active: true } },
+          _count: { _all: true },
+          _sum: { amount: true },
+          orderBy: [{ _count: { customerId: "desc" } }, { _sum: { amount: "desc" } }],
+          take: 5,
+        })
+      : Promise.resolve([]),
   ]);
+  const topCustomers = topTransactionGroups.length
+    ? await db.customer.findMany({
+        where: { id: { in: topTransactionGroups.map(({ customerId }) => customerId) } },
+        select: { id: true, name: true, whatsapp: true, registeredAtId: true, registeredAt: { select: { name: true } } },
+      })
+    : [];
+  const topCustomerCounts = new Map(topTransactionGroups.map((row) => [row.customerId, row._count._all]));
+  const topCustomerGroups = [...topTransactionGroups].sort((left, right) => {
+    const countDifference = right._count._all - left._count._all;
+    if (countDifference) return countDifference;
+    const amountDifference = (right._sum.amount ?? 0) - (left._sum.amount ?? 0);
+    if (amountDifference) return amountDifference;
+    const leftName = topCustomers.find((customer) => customer.id === left.customerId)?.name ?? "";
+    const rightName = topCustomers.find((customer) => customer.id === right.customerId)?.name ?? "";
+    return leftName.localeCompare(rightName, "id");
+  });
+  const topCustomerRows = topCustomerGroups
+    .map((row) => topCustomers.find((customer) => customer.id === row.customerId))
+    .filter((customer): customer is (typeof topCustomers)[number] => Boolean(customer));
   const activeStamps = selected?.stamps.length ?? 0;
   const nonVoidedTransactionCount = selected
     ? await db.transaction.count({ where: { customerId: selected.id, voidRecord: null } })
@@ -126,17 +155,31 @@ async function KasirContent({ searchParams }: { searchParams: SearchParams }) {
             <p>Pencarian lintas cabang berdasarkan nama atau nomor WhatsApp.</p>
             <form className="search-form" method="get">
               <input className="search-input" type="search" name="q" defaultValue={query} placeholder="Nama atau nomor WhatsApp..." aria-label="Cari pelanggan" />
-              <button className="button secondary" type="submit">Cari</button>
+              <button className="button" type="submit">Cari</button>
             </form>
             {query && <div className="customer-results">
               {customers.map((customer) => (
                 <div className={`customer-result${customer.id === selected?.id ? " selected" : ""}`} key={customer.id}>
-                  <span><Link href={`/pelanggan/${encodeURIComponent(customer.id)}`}><strong>{customer.name}</strong></Link><small>{customer.whatsapp} · Terdaftar di {customer.registeredAt.name}</small></span>
+                  <span>{staff.role === "OWNER" || staff.branchId === customer.registeredAtId
+                    ? <Link href={`/pelanggan/${encodeURIComponent(customer.id)}`}><strong>{customer.name}</strong></Link>
+                    : <strong>{customer.name}</strong>}<small>{customer.whatsapp} · Terdaftar di {customer.registeredAt.name}</small></span>
                   <Link href={`/kasir?customer=${encodeURIComponent(customer.id)}`} aria-label={`Pilih ${customer.name}`}>Pilih →</Link>
                 </div>
               ))}
               {!customers.length && <div className="empty-state">Pelanggan tidak ditemukan. <Link href="/kasir?new=1">Daftarkan pelanggan baru</Link>.</div>}
               {customers.length === 10 && <p className="field-hint">Maksimal 10 hasil ditampilkan. Tambahkan kata kunci untuk mempersempit pencarian.</p>}
+            </div>}
+            {!query && !topCustomerRows.length && <div className="empty-state">Belum ada data transaksi.</div>}
+            {!query && topCustomerRows.length > 0 && <div className="customer-results">
+              <h3>Pelanggan dengan transaksi terbanyak</h3>
+              {topCustomerRows.map((customer) => (
+                <div className="customer-result" key={customer.id}>
+                  <span>{staff.role === "OWNER" || staff.branchId === customer.registeredAtId
+                    ? <Link href={`/pelanggan/${encodeURIComponent(customer.id)}`}><strong>{customer.name}</strong></Link>
+                    : <strong>{customer.name}</strong>}<small>{customer.whatsapp} · Terdaftar di {customer.registeredAt.name} · {topCustomerCounts.get(customer.id) ?? 0} transaksi</small></span>
+                  <Link href={`/kasir?customer=${encodeURIComponent(customer.id)}`} aria-label={`Pilih ${customer.name}`}>Pilih →</Link>
+                </div>
+              ))}
             </div>}
           </section>
 
