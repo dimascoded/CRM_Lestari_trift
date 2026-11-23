@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { addStockItem, confirmStockToday, markStockSold, removeStockItem, restoreStockItem, updateStockItem } from "@/app/actions";
+import { AutoFilterForm } from "@/components/AutoFilterForm";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Notice } from "@/components/Notice";
 import { PageHeader } from "@/components/PageHeader";
@@ -65,10 +66,18 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
     }
   }
   const categories = categoryRows.map(({ category: itemCategory }) => itemCategory);
+  const stockFilterParams = new URLSearchParams();
+  if (query) stockFilterParams.set("q", query);
+  if (category) stockFilterParams.set("category", category);
+  if (branchId) stockFilterParams.set("branch", branchId);
+  if (itemStatus) stockFilterParams.set("itemStatus", itemStatus);
+  stockFilterParams.set("tab", activeTab);
+  const addParams = new URLSearchParams(stockFilterParams);
+  addParams.set("add", "1");
 
   return (
     <div className="page-content">
-      <PageHeader eyebrow="OPERASIONAL · INVENTARIS" title="Katalog stok lintas cabang" description="Tambah, ubah, tandai terjual, dan arsipkan barang tanpa menghapus riwayat." action={<Link className="button" href="/stok?add=1">＋ Tambah barang</Link>} />
+      <PageHeader eyebrow="OPERASIONAL · INVENTARIS" title="Katalog stok lintas cabang" description="Tambah, ubah, tandai terjual, dan arsipkan barang tanpa menghapus riwayat." action={<Link className="button" href={`/stok?${addParams.toString()}`}>＋ Tambah barang</Link>} />
       <Notice status={status} detail={detail} />
       <div className="metric-strip">
         <div className="metric-box"><span>Barang tersedia</span><strong>{available}</strong></div>
@@ -99,15 +108,14 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
 
       <div className="stock-workspace section-spacer">
         <section className="table-card">
-          <div className="table-titlebar"><div><h2>Stok semua cabang</h2><p>Daftar barang dan status ketersediaan lintas cabang.</p></div>
-            <form className="filter-row" method="get">
+          <div className="table-titlebar stacked text-bold"><div><h2>Stok semua cabang</h2><p>Daftar barang dan status ketersediaan lintas cabang.</p></div>
+            <AutoFilterForm className="filter-row">
               <input type="hidden" name="tab" value={activeTab} />
               <input className="search-input" name="q" defaultValue={query} placeholder="Cari nama barang..." aria-label="Cari stok" />
               <select name="category" defaultValue={category} aria-label="Filter kategori"><option value="">Semua kategori</option>{categories.map((itemCategory) => <option key={itemCategory}>{itemCategory}</option>)}</select>
               <select name="branch" defaultValue={branchId} aria-label="Filter cabang"><option value="">Semua cabang</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
               <select name="itemStatus" defaultValue={itemStatus} aria-label="Filter status barang"><option value="">Semua status</option><option value="AVAILABLE">Tersedia</option><option value="SOLD">Terjual</option><option value="REMOVED">Diarsipkan</option></select>
-              <button className="button" type="submit">Terapkan filter</button>
-            </form>
+            </AutoFilterForm>
           </div>
           <div className="table-scroll"><table><thead><tr><th>BARANG</th><th>KATEGORI</th><th>UKURAN</th><th>CABANG</th><th>MASUK</th><th>STATUS</th><th>AKSI</th></tr></thead>
             <tbody>{items.map((item) => {
@@ -115,12 +123,7 @@ async function StockContent({ searchParams }: { searchParams: SearchParams }) {
               const statusLabel = item.status === "REMOVED" ? "Diarsipkan" : item.status === "SOLD" ? "Terjual" : dead ? "Stok mati" : "Tersedia";
               const statusTone = item.status === "AVAILABLE" && !dead ? "" : "neutral";
               const canManageItem = staff.role === "OWNER" || item.branchId === staff.branchId;
-              const editParams = new URLSearchParams();
-              if (query) editParams.set("q", query);
-              if (category) editParams.set("category", category);
-              if (branchId) editParams.set("branch", branchId);
-              if (itemStatus) editParams.set("itemStatus", itemStatus);
-              editParams.set("tab", activeTab);
+              const editParams = new URLSearchParams(stockFilterParams);
               editParams.set("edit", item.id);
               return <tr key={item.id}>
                 <td><div className="stock-name"><span className="stock-thumb">♧</span><strong>{item.name}</strong></div></td><td>{item.category}</td><td><span className="tag">{item.size}</span></td><td>{item.branch.name}</td>

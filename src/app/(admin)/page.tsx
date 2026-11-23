@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoFilterForm } from "@/components/AutoFilterForm";
 import { PageHeader } from "@/components/PageHeader";
 import { requireStaffPage } from "@/lib/auth";
 import { DASHBOARD_DEFAULT_PERIOD_DAYS, DASHBOARD_PERIOD_DAYS, STOCK_COMPLIANCE_WINDOW_DAYS, jakartaDayKey, rupiah } from "@/lib/business-rules";
@@ -35,11 +36,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   return <div className="page-content dashboard-page">
     <PageHeader eyebrow={`CRM · ${jakartaDayKey()}`} title="Ringkasan CRM" description="Pantau pelanggan, penjualan, wishlist, stok, pesan, dan KPI dalam satu tampilan." />
-    <form className="dashboard-filter" method="get">
-      <label>Periode<select name="period" defaultValue={String(period)}>{DASHBOARD_PERIOD_DAYS.map((days) => <option value={days} key={days}>{days} hari</option>)}</select></label>
-      {staff.role === "OWNER" && <label>Cabang<select name="branch" defaultValue={branchId ?? ""}><option value="">Semua cabang</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
-      <button className="button" type="submit">Terapkan filter</button>
-    </form>
+    <AutoFilterForm className="dashboard-filter">
+      <select name="period" aria-label="Periode" defaultValue={String(period)}>{DASHBOARD_PERIOD_DAYS.map((days) => <option value={days} key={days}>{days} hari terakhir</option>)}</select>
+      {staff.role === "OWNER" && <select name="branch" aria-label="Cabang" defaultValue={branchId ?? ""}><option value="">Semua cabang</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>}
+    </AutoFilterForm>
     <nav className="anchor-nav" aria-label="Lompat ke bagian dashboard">
       {[["#ringkasan", "Ringkasan"], ["#penjualan", "Penjualan"], ["#pelanggan", "Pelanggan"], ["#wishlist", "Wishlist"], ["#stok", "Stok"], ["#pesan", "Pesan"], ["#kpi", "KPI"]].map(([href, label]) =>
         <a href={href} key={href}>{label}</a>,

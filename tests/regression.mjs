@@ -23,7 +23,7 @@ if (setup.status !== 0) {
 }
 
 process.env.DATABASE_URL = databaseUrl;
-const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, REDEMPTION_DISCOUNT_PERCENT, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT, ACQUISITION_CHANNELS, SEGMENTS }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent, recordCashierConsentRecord }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders, personalSchedule }, { confirmStockTodayRecord }, { getKpis }, { getCustomerSegment }, { featureEnabled, reminderEnabled, setBranchRolloutStageRecord }, { FOLLOWUP_QUEUES, getFollowUpQueues, markFollowedUpRecord }, { getDashboardSummary }, { followUpMessage }, { visibleMessageTabs, resolveMessageTab }] = await Promise.all([
+const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, REDEMPTION_DISCOUNT_PERCENT, MESSAGE_CONSENT_POLICY_VERSION, MESSAGE_CONSENT_TEXT, ACQUISITION_CHANNELS, SEGMENTS }, { hashPassword, verifyPassword, generateCustomerLoginCode, hashCustomerLoginCode, verifyCustomerLoginCode }, { authenticateStaffRecord }, { describeMessageStatus, SIMULATED_SENT_STATUS }, { registerCustomerRecord, setCustomerMarketingConsent, recordCashierConsentRecord }, { recordTransactionRecord, voidTransactionRecord }, { matchStockItem, matchWishlist }, { processDueReminders, personalSchedule }, { confirmStockTodayRecord }, { getKpis }, { getCustomerSegment }, { featureEnabled, reminderEnabled, setBranchRolloutStageRecord }, { FOLLOWUP_QUEUES, getFollowUpQueues, markFollowedUpRecord }, { getDashboardSummary }, { followUpMessage }, { visibleMessageTabs, resolveMessageTab }, { buildFilterQuery }] = await Promise.all([
   import("../src/lib/db.ts"),
   import("../src/lib/business-rules.ts"),
   import("../src/lib/password.ts"),
@@ -41,8 +41,15 @@ const [{ db }, { jakartaDayKey, STAMP_MINIMUM_TRANSACTION, REDEMPTION_DISCOUNT_P
   import("../src/lib/dashboard-service.ts"),
   import("../src/lib/followup-messages.ts"),
   import("../src/lib/message-tabs.ts"),
+  import("../src/lib/filter-query.ts"),
 ]);
 process.env.ROLLOUT_GATING = "off";
+
+test("filter query trims values, preserves field order, and encodes special characters", () => {
+  assert.equal(buildFilterQuery([["q", "  denim  "], ["category", "  "], ["branch", "bali"]]), "q=denim&branch=bali");
+  assert.equal(buildFilterQuery([["q", ""], ["category", " \t "]]), "");
+  assert.equal(buildFilterQuery([["q", "A & B +?"]]), "q=A+%26+B+%2B%3F");
+});
 
 const branches = await Promise.all([
   db.branch.create({ data: { name: "Yogyakarta", rolloutStage: 1 } }),
